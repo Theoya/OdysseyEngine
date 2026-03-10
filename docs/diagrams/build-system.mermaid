@@ -1,0 +1,41 @@
+graph TB
+    subgraph "Build System"
+        CMAKE[CMakeLists.txt]
+        VCPKG[vcpkg.json<br/>Dependencies]
+
+        subgraph "Libraries"
+            CORE[core/<br/>types.h, result.h]
+            VULKAN_LIB[vulkan/<br/>instance, device, swapchain<br/>buffer, pipeline, command]
+            NADIR_LIB[nadir/<br/>system, compiler, buffers]
+        end
+
+        subgraph "Executables"
+            ODYSSEY[odyssey<br/>Main executable]
+            TESTS_U[odyssey_tests_unit<br/>Unit tests]
+            TESTS_P[odyssey_tests_pipeline<br/>Pipeline tests]
+        end
+
+        subgraph "Shader Assets"
+            GLSL_LIB[behaviors/lib/<br/>scoring.glsl, steering.glsl]
+            NADIR_SHADERS[behaviors/shaders/<br/>*.nadir files]
+        end
+    end
+
+    CMAKE --> CORE
+    CMAKE --> VULKAN_LIB
+    CMAKE --> NADIR_LIB
+    VCPKG --> CMAKE
+
+    CORE --> VULKAN_LIB
+    CORE --> NADIR_LIB
+    VULKAN_LIB --> NADIR_LIB
+
+    NADIR_LIB --> ODYSSEY
+    VULKAN_LIB --> ODYSSEY
+
+    NADIR_LIB --> TESTS_U
+    NADIR_LIB --> TESTS_P
+    VULKAN_LIB --> TESTS_U
+    VULKAN_LIB --> TESTS_P
+
+    GLSL_LIB --> NADIR_SHADERS

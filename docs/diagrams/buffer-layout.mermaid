@@ -1,0 +1,22 @@
+graph LR
+    subgraph "Shared Buffers (Read-Only)"
+        B0[Buffer 0<br/>EntityTransforms<br/>vec4 positions per entity<br/>16 bytes/entity]
+        B1[Buffer 1<br/>EntityStats<br/>health, ammo, stamina, speed<br/>32 bytes/entity]
+        B2[Buffer 2<br/>SpatialGrid<br/>cell occupancy, neighbors<br/>16 bytes/cell]
+        B3[Buffer 3<br/>WorldState<br/>time, player pos, frame<br/>uniform, constant size]
+    end
+
+    subgraph "Per-Archetype Buffers"
+        B4[Buffer 4<br/>AgentPersistState<br/>state, timers, memory<br/>64 bytes/entity<br/>READ/WRITE]
+        B5[Buffer 5<br/>BehaviorOutput<br/>move, attack, anim, comms<br/>64 bytes/entity<br/>WRITE]
+        B6[Buffer 6<br/>DebugOutput<br/>visualization data<br/>16 bytes/entity<br/>WRITE]
+    end
+
+    B0 --> GPU[Compute Shader<br/>.nadir]
+    B1 --> GPU
+    B2 --> GPU
+    B3 --> GPU
+    B4 --> GPU
+    GPU --> B4
+    GPU --> B5
+    GPU --> B6
