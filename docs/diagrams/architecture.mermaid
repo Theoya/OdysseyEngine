@@ -1,0 +1,40 @@
+graph TB
+    subgraph "OdysseyEngine"
+        CLI[CLI Interface<br/>odyssey commands]
+        APP[Application<br/>Main Loop]
+
+        subgraph "GPU Pipeline"
+            NADIR[Nadir System<br/>Behavior Dispatch]
+            COMPILER[Behavior Compiler<br/>shaderc GLSL to SPIR-V]
+            BUFFERS[Buffer Manager<br/>SSBO Layout]
+        end
+
+        subgraph "Vulkan Layer"
+            INST[Instance]
+            DEV[Device + VMA]
+            SWAP[Swapchain]
+            PIPE[Compute Pipeline]
+            CMD[Command Buffers]
+        end
+
+        subgraph "Assets"
+            SCENES[Scene Loader<br/>.scene.xml]
+            PREFABS[Prefab Loader<br/>.prefab.xml]
+            SHADERS[Behavior Shaders<br/>.nadir files]
+        end
+    end
+
+    CLI --> APP
+    APP --> NADIR
+    NADIR --> COMPILER
+    NADIR --> BUFFERS
+    NADIR --> PIPE
+    BUFFERS --> DEV
+    PIPE --> DEV
+    CMD --> DEV
+    APP --> SWAP
+    SWAP --> DEV
+    DEV --> INST
+    SCENES --> APP
+    PREFABS --> SCENES
+    SHADERS --> COMPILER

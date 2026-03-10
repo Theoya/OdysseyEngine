@@ -1,0 +1,26 @@
+sequenceDiagram
+    participant CPU as CPU (C++)
+    participant SSBO as GPU Buffers (SSBOs)
+    participant GPU as GPU Compute
+    participant DS as Downstream Systems
+
+    Note over CPU: Frame Start
+    CPU->>SSBO: Update WorldState (time, player pos)
+    CPU->>SSBO: Update EntityTransforms
+    CPU->>SSBO: Update EntityStats
+
+    loop For Each Archetype
+        CPU->>GPU: Bind SSBOs + Pipeline
+        CPU->>GPU: vkCmdDispatch(ceil(N/256), 1, 1)
+        GPU->>SSBO: Read game state (bindings 0-4)
+        GPU->>GPU: Evaluate behavior (scoring + steering)
+        GPU->>SSBO: Write BehaviorOutput (binding 5)
+        GPU->>SSBO: Write DebugOutput (binding 6)
+        Note over GPU: Memory barrier
+    end
+
+    DS->>SSBO: Read BehaviorOutput
+    DS->>DS: Apply movement (move_vector)
+    DS->>DS: Apply combat (attack_target)
+    DS->>DS: Apply animation (animation_id)
+    Note over CPU: Frame End / Present

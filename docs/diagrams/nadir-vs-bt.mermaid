@@ -1,0 +1,36 @@
+graph TB
+    subgraph "Traditional Behavior Tree"
+        BT_ROOT[Root Selector] --> BT_SEQ1[Sequence: Attack]
+        BT_ROOT --> BT_SEQ2[Sequence: Flee]
+        BT_ROOT --> BT_SEQ3[Sequence: Patrol]
+
+        BT_SEQ1 --> BT_CHECK1[Check: Has Ammo?]
+        BT_SEQ1 --> BT_CHECK2[Check: Enemy Visible?]
+        BT_SEQ1 --> BT_ACT1[Action: ATTACK]
+
+        BT_SEQ2 --> BT_CHECK3[Check: Low Health?]
+        BT_SEQ2 --> BT_ACT2[Action: FLEE]
+
+        BT_SEQ3 --> BT_ACT3[Action: PATROL]
+
+        style BT_ACT1 fill:#f96,stroke:#333
+        style BT_ACT2 fill:#999,stroke:#333
+        style BT_ACT3 fill:#999,stroke:#333
+    end
+
+    subgraph "Nadir Weighted Scoring"
+        N_INPUT[Game State Input<br/>health, ammo, threat, allies]
+        N_SCORE[Parallel Score ALL<br/>No branching, pure math]
+
+        N_INPUT --> N_SCORE
+
+        N_SCORE --> N_ATK[attack_weight = 0.8]
+        N_SCORE --> N_FLEE[flee_weight = 0.2]
+        N_SCORE --> N_PATROL[patrol_weight = 0.1]
+        N_SCORE --> N_COMMS[comms_weight = 0.4]
+
+        style N_ATK fill:#f96,stroke:#333
+        style N_FLEE fill:#fc9,stroke:#333
+        style N_PATROL fill:#fec,stroke:#333
+        style N_COMMS fill:#f96,stroke:#333
+    end
