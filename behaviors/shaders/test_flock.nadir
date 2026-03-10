@@ -1,0 +1,86 @@
+// test_flock.nadir — Simple flocking behavior for 1000+ agents
+// This file is compiled as a GLSL compute shader with auto-prepended buffer declarations.
+
+#include "scoring.glsl"
+#include "steering.glsl"
+
+void main() {
+    uint idx = gl_GlobalInvocationID.x;
+    if (idx >= total_entities) return;
+
+    // Read current state
+    vec3 pos = positions[idx].xyz;
+    float hp = stats[idx].health;
+    float max_hp = stats[idx].max_health;
+    float spd = stats[idx].speed;
+
+    // Simple neighbor approximation using nearby agents
+    // (In full implementation, spatial grid provides actual neighbors)
+    // For now, use a simple approximation based on adjacent indices
+    vec3 neighbor_center = vec3(0.0);
+    vec3 neighbor_vel = vec3(0.0);
+    float neighbor_count = 0.0;
+
+    uint search_radius = 10u;
+    for (uint i = max(0u, idx - search_radius); i < min(total_entities, idx + search_radius); i++) {
+        if (i == idx) continue;
+        vec3 other_pos = positions[i].xyz;
+        float dist = distance_to(pos, other_pos);
+        if (dist < 15.0) {  // neighbor radius
+            neighbor_center += other_pos;
+            // Approximate velocity from position delta (no velocity buffer yet)
+            neighbor_vel += normalize(other_pos - pos) * stats[i].speed;
+            neighbor_count += 1.0;
+        }
+    }
+
+    if (neighbor_count > 0.0) {
+        neighbor_center /= neighbor_count;
+        neighbor_vel /= neighbor_count;
+    }
+
+    // Score behaviors
+    float health_score = score_health(hp, max_hp);
+    float damage_score = score_damage(hp, max_hp);
+
+    // Flocking steering
+    vec3 flock_dir = steer_flock(
+        pos, neighbor_vel,
+        neighbor_center, neighbor_vel, neighbor_count,
+        spd,
+        2.0,  // separation weight
+        1.0,  // cohesion weight
+        1.5   // alignment weight
+    );
+
+    // Seek toward player (weighted by health — healthy agents are bolder)
+    vec3 seek_dir = steer_seek(pos, player_position.xyz, spd);
+    float seek_weight = health_score * 0.5;
+
+    // Flee from player when low health
+    vec3 flee_dir = steer_flee(pos, player_position.xyz, spd);
+    float flee_weight = damage_score * 0.8;
+
+    // Blend movement
+    vec3 final_move = flock_dir * 0.6 + seek_dir * seek_weight + flee_dir * flee_weight;
+    float final_weight = max(0.1, length(final_move) / max(spd, 0.001));
+
+    // Normalize
+    float move_len = length(final_move);
+    if (move_len > 0.001) {
+        final_move = (final_move / move_len) * min(move_len, spd);
+    }
+
+    // Write outputs
+    outputs[idx].move_vector = vec4(final_move, final_weight);
+    outputs[idx].attack_target = vec4(player_position.xyz, seek_weight * health_score);
+    outputs[idx].animation_id = (flee_weight > seek_weight) ? 2u : 1u; // 1=walk, 2=run
+    outputs[idx].animation_blend = clamp(move_len / spd, 0.0, 1.0);
+    outputs[idx].sound_event = 0u;
+    outputs[idx].sound_priority = 0.0;
+    outputs[idx].comms_signal = 0.0;
+    outputs[idx].comms_urgency = 0.0;
+
+    // Debug: output health as color intensity
+    debug_data[idx] = vec4(damage_score, health_score, flee_weight, seek_weight);
+}
