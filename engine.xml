@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<engine version="1">
+  <window width="1920" height="1080" title="OdysseyEngine" vsync="true"/>
+  <vulkan validation_layers="true" gpu_index="0"/>
+  <nadir>
+    <behavior_dir>behaviors/shaders</behavior_dir>
+    <lib_dir>behaviors/lib</lib_dir>
+    <hot_reload>true</hot_reload>
+    <max_agents>100000</max_agents>
+  </nadir>
+  <mcp port="3000" enabled="false"/>
+  <cli>
+    <output_format>text</output_format>
+  </cli>
+  <testing>
+    <gpu_test_device>0</gpu_test_device>
+    <pipeline_test_timeout_ms>5000</pipeline_test_timeout_ms>
+  </testing>
+</engine>

@@ -1,0 +1,88 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema"
+           targetNamespace="https://odysseyengine.dev/scene"
+           xmlns:od="https://odysseyengine.dev/scene"
+           elementFormDefault="qualified">
+
+  <!-- Root element -->
+  <xs:element name="scene" type="od:SceneType"/>
+
+  <xs:complexType name="SceneType">
+    <xs:sequence>
+      <xs:element name="world"  type="od:WorldType"  minOccurs="0" maxOccurs="1"/>
+      <xs:element name="entity" type="od:EntityType" minOccurs="0" maxOccurs="unbounded"/>
+      <xs:element name="spawn_region" type="od:SpawnRegionType" minOccurs="0" maxOccurs="unbounded"/>
+    </xs:sequence>
+    <xs:attribute name="name"    type="xs:string"       use="required"/>
+    <xs:attribute name="version" type="xs:positiveInteger" use="required"/>
+  </xs:complexType>
+
+  <!-- World settings -->
+  <xs:complexType name="WorldType">
+    <xs:attribute name="time_scale" type="xs:float" default="1.0"/>
+    <xs:attribute name="gravity"    type="xs:float" default="-9.81"/>
+  </xs:complexType>
+
+  <!-- Entity -->
+  <xs:complexType name="EntityType">
+    <xs:sequence>
+      <xs:element name="transform" type="od:TransformType" minOccurs="0" maxOccurs="1"/>
+      <xs:element name="stats"     type="od:StatsType"     minOccurs="0" maxOccurs="1"/>
+      <xs:element name="behavior"  type="od:BehaviorType"  minOccurs="0" maxOccurs="1"/>
+      <xs:element name="mesh"      type="od:MeshType"      minOccurs="0" maxOccurs="1"/>
+      <xs:element name="script"    type="od:ScriptType"    minOccurs="0" maxOccurs="unbounded"/>
+      <xs:element name="pack"      type="od:PackType"      minOccurs="0" maxOccurs="1"/>
+    </xs:sequence>
+    <xs:attribute name="id"        type="xs:string"             use="required"/>
+    <xs:attribute name="archetype" type="xs:string"             use="required"/>
+    <xs:attribute name="count"     type="xs:positiveInteger"    default="1"/>
+  </xs:complexType>
+
+  <!-- Transform -->
+  <xs:complexType name="TransformType">
+    <xs:attribute name="position" type="xs:string" default="0 0 0"/>
+    <xs:attribute name="rotation" type="xs:string" default="0 0 0"/>
+    <xs:attribute name="scale"    type="xs:string" default="1 1 1"/>
+  </xs:complexType>
+
+  <!-- Stats -->
+  <xs:complexType name="StatsType">
+    <xs:attribute name="health"     type="xs:float" default="100.0"/>
+    <xs:attribute name="max_health" type="xs:float" default="100.0"/>
+    <xs:attribute name="speed"      type="xs:float" default="5.0"/>
+    <xs:attribute name="ammo"       type="xs:float" default="0.0"/>
+    <xs:attribute name="stamina"    type="xs:float" default="100.0"/>
+  </xs:complexType>
+
+  <!-- Behavior (Nadir compute shader) -->
+  <xs:complexType name="BehaviorType">
+    <xs:attribute name="shader" type="xs:string" use="required"/>
+  </xs:complexType>
+
+  <!-- Mesh reference -->
+  <xs:complexType name="MeshType">
+    <xs:attribute name="src" type="xs:string" use="required"/>
+  </xs:complexType>
+
+  <!-- Script -->
+  <xs:complexType name="ScriptType">
+    <xs:attribute name="class"  type="xs:string" use="required"/>
+    <xs:attribute name="config" type="xs:string"/>
+  </xs:complexType>
+
+  <!-- Pack (flocking / squad) -->
+  <xs:complexType name="PackType">
+    <xs:attribute name="leader" type="xs:string" use="required"/>
+  </xs:complexType>
+
+  <!-- Spawn region -->
+  <xs:complexType name="SpawnRegionType">
+    <xs:sequence>
+      <xs:element name="entity" type="od:EntityType" minOccurs="1" maxOccurs="unbounded"/>
+    </xs:sequence>
+    <xs:attribute name="name"     type="xs:string" use="required"/>
+    <xs:attribute name="position" type="xs:string" default="0 0 0"/>
+    <xs:attribute name="radius"   type="xs:float"  default="10.0"/>
+  </xs:complexType>
+
+</xs:schema>

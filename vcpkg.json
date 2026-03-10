@@ -1,0 +1,17 @@
+{
+  "name": "odyssey-engine",
+  "version": "0.1.0",
+  "dependencies": [
+    "glfw3",
+    "vulkan-memory-allocator",
+    "glm",
+    "stb",
+    "tinyobjloader",
+    "imgui",
+    "spdlog",
+    "shaderc",
+    "pugixml",
+    "cli11",
+    "gtest"
+  ]
+}
