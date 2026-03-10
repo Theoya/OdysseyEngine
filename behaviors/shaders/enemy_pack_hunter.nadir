@@ -1,0 +1,146 @@
+// enemy_pack_hunter.nadir — Pack hunting AI with state machine + weighted scoring
+#include "scoring.glsl"
+#include "steering.glsl"
+#include "spatial.glsl"
+#include "state_machine.glsl"
+#include "blackboard.glsl"
+#include "debug.glsl"
+
+void main() {
+    uint idx = gl_GlobalInvocationID.x;
+    if (idx >= total_entities) return;
+
+    // Read state
+    vec3 pos = positions[idx].xyz;
+    float hp = stats[idx].health;
+    float max_hp = stats[idx].max_health;
+    float spd = stats[idx].speed;
+    float ammo = stats[idx].ammo;
+    vec3 player_pos = player_position.xyz;
+    float dt = delta_time;
+
+    // Persistent state
+    uint state = persist[idx].current_state;
+    float state_timer = persist[idx].state_timer + dt;
+    float cd0 = cooldown_tick(persist[idx].cooldown_0, dt); // attack cooldown
+    float cd1 = cooldown_tick(persist[idx].cooldown_1, dt); // comms cooldown
+
+    // Scores
+    float health_norm = score_health(hp, max_hp);
+    float damage_norm = score_damage(hp, max_hp);
+    float dist_to_player = distance_to(pos, player_pos);
+    float proximity = score_proximity(dist_to_player, 30.0);
+    float distance_score = score_distance(dist_to_player, 50.0);
+
+    // Count nearby allies
+    float ally_count = 0.0;
+    vec3 ally_center = vec3(0.0);
+    vec3 ally_avg_vel = vec3(0.0);
+    uint search_range = min(20u, total_entities);
+    for (uint i = 0u; i < search_range; i++) {
+        uint other = (idx + i + 1u) % total_entities;
+        if (other == idx) continue;
+        vec3 other_pos = positions[other].xyz;
+        if (distance_to(pos, other_pos) < 20.0) {
+            ally_center += other_pos;
+            ally_avg_vel += normalize(other_pos - pos) * stats[other].speed;
+            ally_count += 1.0;
+        }
+    }
+    if (ally_count > 0.0) {
+        ally_center /= ally_count;
+        ally_avg_vel /= ally_count;
+    }
+    float ally_ratio = clamp(ally_count / 5.0, 0.0, 1.0);
+
+    // State transition scoring
+    float combat_score = proximity * health_norm * (0.5 + ally_ratio * 0.5) + hysteresis_bonus(state, STATE_COMBAT, 0.1);
+    float flee_score = damage_norm * proximity * (1.0 - ally_ratio * 0.5) + hysteresis_bonus(state, STATE_FLEE, 0.15);
+    float patrol_score = (1.0 - proximity) * 0.5 + hysteresis_bonus(state, STATE_PATROL, 0.2);
+    float alert_score = proximity * (1.0 - health_norm * 0.5) * 0.6 + hysteresis_bonus(state, STATE_ALERT, 0.1);
+
+    // State transition
+    uint new_state = state;
+    float max_score = max4(combat_score, flee_score, patrol_score, alert_score);
+    if (max_score > 0.3) {
+        if (combat_score == max_score) new_state = STATE_COMBAT;
+        else if (flee_score == max_score) new_state = STATE_FLEE;
+        else if (alert_score == max_score) new_state = STATE_ALERT;
+        else new_state = STATE_PATROL;
+    }
+
+    // Reset timer on state change
+    if (new_state != state) state_timer = 0.0;
+
+    // Movement based on state
+    vec3 move_dir = vec3(0.0);
+    float move_weight = 0.0;
+    float attack_weight = 0.0;
+
+    // Patrol: wander + flock with allies
+    vec3 home = bb_recall_home_pos(idx);
+    if (length(home) < 0.001) { home = pos; bb_store_home_pos(idx, pos); }
+
+    vec3 patrol_dir = steer_flock(pos, ally_avg_vel, ally_center, ally_avg_vel, ally_count, spd, 1.5, 1.0, 1.2);
+    vec3 home_pull = steer_arrive(pos, home, spd, 15.0);
+    patrol_dir = mix(patrol_dir, home_pull, 0.3);
+
+    // Combat: approach + flank
+    vec3 flank_offset = normalize(cross(direction_to(pos, player_pos), vec3(0,1,0))) * 8.0;
+    vec3 flank_target = player_pos + flank_offset * sign(float(idx % 2u) - 0.5);
+    vec3 combat_dir = steer_arrive(pos, flank_target, spd, 5.0);
+
+    // Flee: run away from player toward allies
+    vec3 flee_target = (ally_count > 0.0) ? ally_center : pos + steer_flee(pos, player_pos, spd);
+    vec3 flee_dir = steer_flee(pos, player_pos, spd) * 0.7 + steer_seek(pos, flee_target, spd) * 0.3;
+
+    // Alert: slow approach, keep distance
+    vec3 alert_dir = steer_arrive(pos, player_pos, spd * 0.5, 15.0);
+
+    // Blend by state (using float weights, not branches)
+    float w_patrol = float(new_state == STATE_PATROL);
+    float w_combat = float(new_state == STATE_COMBAT);
+    float w_flee = float(new_state == STATE_FLEE);
+    float w_alert = float(new_state == STATE_ALERT);
+
+    move_dir = patrol_dir * w_patrol + combat_dir * w_combat + flee_dir * w_flee + alert_dir * w_alert;
+    move_weight = w_patrol * 0.6 + w_combat * 0.9 + w_flee * 1.0 + w_alert * 0.7;
+
+    // Attack when in combat, close enough, and cooldown ready
+    attack_weight = w_combat * proximity * float(cooldown_is_ready(cd0)) * health_norm;
+    if (attack_weight > 0.5) cd0 = cooldown_start(1.5); // 1.5s attack cooldown
+
+    // Comms: call allies when entering combat
+    float comms_weight = 0.0;
+    if (new_state == STATE_COMBAT && cooldown_is_ready(cd1)) {
+        comms_weight = combat_score * 0.8;
+        if (comms_weight > 0.4) cd1 = cooldown_start(5.0); // 5s comms cooldown
+    }
+
+    // Store last known player position when visible
+    if (proximity > 0.2) bb_store_last_player_pos(idx, player_pos);
+
+    // Normalize movement
+    float move_len = length(move_dir);
+    if (move_len > 0.001) move_dir = (move_dir / move_len) * min(move_len, spd);
+
+    // Write outputs
+    outputs[idx].move_vector = vec4(move_dir, move_weight);
+    outputs[idx].attack_target = vec4(player_pos, attack_weight);
+    outputs[idx].animation_id = new_state; // state maps to animation
+    outputs[idx].animation_blend = clamp(move_len / spd, 0.0, 1.0);
+    outputs[idx].sound_event = (attack_weight > 0.5) ? 1u : 0u;
+    outputs[idx].sound_priority = attack_weight;
+    outputs[idx].comms_signal = comms_weight;
+    outputs[idx].comms_urgency = combat_score;
+
+    // Update persistent state
+    persist[idx].current_state = new_state;
+    persist[idx].state_timer = state_timer;
+    persist[idx].cooldown_0 = cd0;
+    persist[idx].cooldown_1 = cd1;
+    persist[idx].last_decision = new_state;
+
+    // Debug
+    debug_state_color(idx, new_state);
+}

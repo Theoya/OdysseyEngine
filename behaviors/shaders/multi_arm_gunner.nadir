@@ -1,0 +1,139 @@
+// multi_arm_gunner.nadir — Multi-armed enemy with independent weapon scoring
+// Each of 4 arms evaluates independently. All can fire simultaneously.
+// This is impossible in a traditional behavior tree.
+
+#include "scoring.glsl"
+#include "steering.glsl"
+#include "spatial.glsl"
+#include "state_machine.glsl"
+#include "blackboard.glsl"
+#include "debug.glsl"
+
+void main() {
+    uint idx = gl_GlobalInvocationID.x;
+    if (idx >= total_entities) return;
+
+    vec3 pos = positions[idx].xyz;
+    float hp = stats[idx].health;
+    float max_hp = stats[idx].max_health;
+    float spd = stats[idx].speed;
+    float ammo_total = stats[idx].ammo;
+    vec3 player_pos = player_position.xyz;
+    float dt = delta_time;
+
+    // Persistent state
+    uint state = persist[idx].current_state;
+    float state_timer = persist[idx].state_timer + dt;
+    float cd0 = cooldown_tick(persist[idx].cooldown_0, dt); // shotgun cooldown
+    float cd1 = cooldown_tick(persist[idx].cooldown_1, dt); // sniper cooldown
+
+    // Derived scores
+    float health_norm = score_health(hp, max_hp);
+    float damage_norm = score_damage(hp, max_hp);
+    float dist = distance_to(pos, player_pos);
+    float dist_norm = score_distance(dist, 50.0);
+    float prox = score_proximity(dist, 50.0);
+
+    // Approximate player movement (stationary detection via blackboard)
+    vec3 last_player = bb_recall_last_player_pos(idx);
+    float player_movement = distance_to(last_player, player_pos);
+    float player_stationary = smooth_threshold(0.5 - player_movement, 0.3, 0.2);
+    bb_store_last_player_pos(idx, player_pos);
+
+    // Ammo distribution (4 weapons share total ammo pool conceptually)
+    float ammo_norm = clamp(ammo_total / 100.0, 0.0, 1.0);
+    float ammo_shotgun = ammo_norm;
+    float ammo_sniper = ammo_norm;
+    float ammo_smg = ammo_norm;
+
+    // Incoming damage estimation (health drop rate)
+    float prev_health = bb_read_float(idx, 3u);
+    float health_delta = (prev_health > 0.001) ? (prev_health - hp) / max(dt, 0.001) : 0.0;
+    float incoming_damage_norm = clamp(health_delta / 50.0, 0.0, 1.0);
+    bb_write_float(idx, 3u, hp);
+
+    // ===== PER-ARM SCORING (all evaluated simultaneously, no branching) =====
+
+    // Arm 0: Shotgun — high score at close range
+    float shotgun_score = prox * prox * ammo_shotgun * 0.9
+        * float(cooldown_is_ready(cd0));
+
+    // Arm 1: Sniper — high score at long range + stationary target
+    float sniper_score = dist_norm * player_stationary * ammo_sniper * 0.85
+        * float(cooldown_is_ready(cd1));
+
+    // Arm 2: SMG — high score at medium range (suppression)
+    float smg_score = bell_curve(dist_norm, 0.5, 0.2) * ammo_smg * 0.7;
+
+    // Arm 3: Shield — high score when taking damage and low health
+    float shield_score = incoming_damage_norm * damage_norm * 0.95;
+
+    // Arm actions (pack into move_vector and attack_target)
+    // We encode 4 arm scores in the output creatively:
+    // attack_target.w = primary attack weight (max of weapon scores)
+    // comms_signal = shield activation
+    // Use debug buffer for full per-arm data
+
+    float best_weapon = max3(shotgun_score, sniper_score, smg_score);
+
+    // Update cooldowns on fire
+    if (shotgun_score > 0.6 && shotgun_score >= best_weapon) cd0 = cooldown_start(1.2);
+    if (sniper_score > 0.6 && sniper_score >= best_weapon) cd1 = cooldown_start(3.0);
+
+    // ===== MOVEMENT =====
+    // State machine: COMBAT when healthy, FLEE when critical, COVER when taking damage
+    float combat_mod = health_norm * 0.7 + hysteresis_bonus(state, STATE_COMBAT, 0.15);
+    float flee_mod = damage_norm * incoming_damage_norm + hysteresis_bonus(state, STATE_FLEE, 0.2);
+    float cover_mod = incoming_damage_norm * (1.0 - health_norm) * 0.8 + hysteresis_bonus(state, STATE_COVER, 0.1);
+
+    uint new_state = state;
+    float max_mod = max3(combat_mod, flee_mod, cover_mod);
+    if (max_mod > 0.25) {
+        if (combat_mod >= max_mod) new_state = STATE_COMBAT;
+        else if (flee_mod >= max_mod) new_state = STATE_FLEE;
+        else new_state = STATE_COVER;
+    }
+    if (new_state != state) state_timer = 0.0;
+
+    // Movement per state
+    // Combat: maintain medium distance (ideal for mixed weapons)
+    float ideal_dist = 20.0;
+    vec3 to_player = direction_to(pos, player_pos);
+    vec3 combat_move = (dist < ideal_dist - 3.0) ? -to_player * spd :
+                       (dist > ideal_dist + 3.0) ? to_player * spd :
+                       cross(to_player, vec3(0,1,0)) * spd * 0.5; // strafe
+
+    vec3 flee_move = steer_flee(pos, player_pos, spd);
+
+    // Cover: move perpendicular to player (find cover)
+    vec3 cover_dir = normalize(cross(to_player, vec3(0,1,0))) * spd;
+    cover_dir *= sign(sin(world_time * 2.0 + float(idx))); // alternate sides
+
+    float w_combat = float(new_state == STATE_COMBAT);
+    float w_flee = float(new_state == STATE_FLEE);
+    float w_cover = float(new_state == STATE_COVER);
+
+    vec3 final_move = combat_move * w_combat + flee_move * w_flee + cover_dir * w_cover;
+    float move_len = length(final_move);
+    if (move_len > spd) final_move = (final_move / move_len) * spd;
+
+    // ===== WRITE OUTPUTS =====
+    outputs[idx].move_vector = vec4(final_move, max(w_combat, max(w_flee, w_cover)));
+    outputs[idx].attack_target = vec4(player_pos, best_weapon);
+    outputs[idx].animation_id = new_state + (shield_score > 0.5 ? 10u : 0u); // shield anim offset
+    outputs[idx].animation_blend = clamp(move_len / spd, 0.0, 1.0);
+    outputs[idx].sound_event = (best_weapon > 0.6) ? 2u : 0u;
+    outputs[idx].sound_priority = best_weapon;
+    outputs[idx].comms_signal = shield_score; // repurpose for shield
+    outputs[idx].comms_urgency = incoming_damage_norm;
+
+    // Update state
+    persist[idx].current_state = new_state;
+    persist[idx].state_timer = state_timer;
+    persist[idx].cooldown_0 = cd0;
+    persist[idx].cooldown_1 = cd1;
+    persist[idx].last_decision = new_state;
+
+    // Debug: per-arm scores in RGBA
+    debug_pack4(idx, shotgun_score, sniper_score, smg_score, shield_score);
+}

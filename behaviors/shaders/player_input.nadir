@@ -1,0 +1,54 @@
+// player_input.nadir — GPU-side player movement from input state
+#include "scoring.glsl"
+#include "steering.glsl"
+
+void main() {
+    uint idx = gl_GlobalInvocationID.x;
+    if (idx >= total_entities) return;
+
+    vec3 pos = positions[idx].xyz;
+    float spd = stats[idx].speed;
+
+    // Player input is encoded in persist state:
+    // memory_0.x = forward/backward (-1 to 1)
+    // memory_0.y = strafe left/right (-1 to 1)
+    // memory_0.z = look yaw (radians)
+    // memory_0.w = shoot flag (0 or 1)
+    float input_forward = persist[idx].memory_0.x;
+    float input_strafe = persist[idx].memory_0.y;
+    float look_yaw = persist[idx].memory_0.z;
+    float shoot = persist[idx].memory_0.w;
+
+    // Construct movement direction from input + look direction
+    vec3 forward = vec3(sin(look_yaw), 0.0, cos(look_yaw));
+    vec3 right = vec3(cos(look_yaw), 0.0, -sin(look_yaw));
+
+    vec3 move_dir = forward * input_forward + right * input_strafe;
+    float move_len = length(move_dir);
+    if (move_len > 0.001) {
+        move_dir = (move_dir / move_len) * spd;
+    }
+
+    // Movement weight based on input magnitude
+    float move_weight = clamp(move_len, 0.0, 1.0);
+
+    // Attack: shoot in look direction
+    vec3 aim_target = pos + forward * 100.0; // aim point far ahead
+    float attack_weight = shoot;
+
+    // Animation: 0=idle, 1=walk, 2=run based on speed
+    uint anim = 0u;
+    if (move_len > 0.1) anim = 1u;
+    if (move_len > 0.7) anim = 2u;
+
+    outputs[idx].move_vector = vec4(move_dir, move_weight);
+    outputs[idx].attack_target = vec4(aim_target, attack_weight);
+    outputs[idx].animation_id = anim;
+    outputs[idx].animation_blend = clamp(move_len, 0.0, 1.0);
+    outputs[idx].sound_event = (shoot > 0.5) ? 3u : 0u;
+    outputs[idx].sound_priority = shoot;
+    outputs[idx].comms_signal = 0.0;
+    outputs[idx].comms_urgency = 0.0;
+
+    debug_data[idx] = vec4(move_dir * 0.5 + 0.5, move_weight);
+}

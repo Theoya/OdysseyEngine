@@ -1,0 +1,75 @@
+// projectile_physics.nadir — GPU projectile physics (trajectory + lifetime)
+#include "scoring.glsl"
+
+void main() {
+    uint idx = gl_GlobalInvocationID.x;
+    if (idx >= total_entities) return;
+
+    vec3 pos = positions[idx].xyz;
+    float dt = delta_time;
+    float spd = stats[idx].speed; // projectile speed
+
+    // Projectile state in persist:
+    // current_state: 0=active, 5=dead
+    // state_timer: lifetime elapsed
+    // memory_0.xyz: velocity vector (set on spawn)
+    // cooldown_0: max lifetime
+    uint state = persist[idx].current_state;
+    if (state == 5u) {
+        // Dead projectile — no output
+        outputs[idx].move_vector = vec4(0.0);
+        outputs[idx].attack_target = vec4(0.0);
+        return;
+    }
+
+    float lifetime = persist[idx].state_timer + dt;
+    float max_lifetime = persist[idx].cooldown_0;
+    if (max_lifetime < 0.001) max_lifetime = 3.0; // default 3 seconds
+
+    vec3 velocity = persist[idx].memory_0.xyz;
+
+    // Apply gravity (light, for arcing projectiles)
+    velocity.y -= 4.9 * dt;
+
+    // Movement = velocity * dt
+    vec3 move = velocity * dt;
+
+    // Check lifetime expiry
+    if (lifetime >= max_lifetime) {
+        persist[idx].current_state = 5u; // dead
+        outputs[idx].move_vector = vec4(0.0);
+        outputs[idx].attack_target = vec4(0.0);
+        return;
+    }
+
+    // Collision detection: check proximity to all entities
+    // (simplified — check against player position)
+    float dist_to_player = length(pos - player_position.xyz);
+    float hit_radius = 1.0;
+    float hit = step(dist_to_player, hit_radius) * step(0.1, lifetime); // don't self-hit at spawn
+
+    if (hit > 0.5) {
+        // Hit! Report damage via attack output
+        persist[idx].current_state = 5u;
+        outputs[idx].move_vector = vec4(0.0);
+        outputs[idx].attack_target = vec4(player_position.xyz, 1.0); // damage weight
+        outputs[idx].sound_event = 4u; // impact sound
+        outputs[idx].sound_priority = 1.0;
+    } else {
+        outputs[idx].move_vector = vec4(move, 1.0);
+        outputs[idx].attack_target = vec4(0.0);
+        outputs[idx].sound_event = 0u;
+        outputs[idx].sound_priority = 0.0;
+    }
+
+    outputs[idx].animation_id = 0u;
+    outputs[idx].animation_blend = 0.0;
+    outputs[idx].comms_signal = 0.0;
+    outputs[idx].comms_urgency = 0.0;
+
+    // Update state
+    persist[idx].state_timer = lifetime;
+    persist[idx].memory_0 = vec4(velocity, 0.0);
+
+    debug_data[idx] = vec4(normalize(velocity) * 0.5 + 0.5, lifetime / max_lifetime);
+}

@@ -1,0 +1,91 @@
+// enemy_ranged.nadir — Ranged combat AI: maintains distance, uses cover, snipes
+#include "scoring.glsl"
+#include "steering.glsl"
+#include "spatial.glsl"
+#include "state_machine.glsl"
+#include "blackboard.glsl"
+#include "debug.glsl"
+
+void main() {
+    uint idx = gl_GlobalInvocationID.x;
+    if (idx >= total_entities) return;
+
+    vec3 pos = positions[idx].xyz;
+    float hp = stats[idx].health;
+    float max_hp = stats[idx].max_health;
+    float spd = stats[idx].speed;
+    float ammo = stats[idx].ammo;
+    vec3 player_pos = player_position.xyz;
+    float dt = delta_time;
+
+    uint state = persist[idx].current_state;
+    float state_timer = persist[idx].state_timer + dt;
+    float attack_cd = cooldown_tick(persist[idx].cooldown_0, dt);
+
+    float health_norm = score_health(hp, max_hp);
+    float dist = distance_to(pos, player_pos);
+    float ammo_norm = clamp(ammo / 50.0, 0.0, 1.0);
+
+    // Ideal engagement range: 25-40 units
+    float range_score = bell_curve(dist / 50.0, 0.65, 0.15);
+    float too_close = smooth_threshold(15.0 - dist, 5.0, 3.0);
+    float too_far = smooth_threshold(dist - 45.0, 5.0, 3.0);
+
+    // State scoring
+    float combat_s = range_score * health_norm * ammo_norm + hysteresis_bonus(state, STATE_COMBAT, 0.15);
+    float reposition_s = (too_close + too_far) * 0.8 + hysteresis_bonus(state, STATE_ALERT, 0.1);
+    float flee_s = score_damage(hp, max_hp) * too_close + hysteresis_bonus(state, STATE_FLEE, 0.15);
+
+    uint new_state = state;
+    float best = max3(combat_s, reposition_s, flee_s);
+    if (best > 0.25) {
+        if (combat_s >= best) new_state = STATE_COMBAT;
+        else if (reposition_s >= best) new_state = STATE_ALERT; // reposition
+        else new_state = STATE_FLEE;
+    }
+    if (new_state != state) state_timer = 0.0;
+
+    // Movement
+    vec3 to_player = direction_to(pos, player_pos);
+    float ideal_dist = 32.0;
+
+    // Combat: hold position, slight strafe
+    vec3 strafe = cross(to_player, vec3(0,1,0)) * sin(world_time * 1.5 + float(idx) * 2.3) * spd * 0.3;
+    vec3 range_adjust = to_player * (dist - ideal_dist) * 0.1;
+    vec3 combat_move = strafe + range_adjust;
+
+    // Reposition: move to ideal range
+    vec3 repo_target = player_pos - to_player * ideal_dist;
+    vec3 repo_move = steer_arrive(pos, repo_target, spd, 10.0);
+
+    // Flee
+    vec3 flee_move = steer_flee(pos, player_pos, spd);
+
+    float w_c = float(new_state == STATE_COMBAT);
+    float w_r = float(new_state == STATE_ALERT);
+    float w_f = float(new_state == STATE_FLEE);
+
+    vec3 move = combat_move * w_c + repo_move * w_r + flee_move * w_f;
+    float mlen = length(move);
+    if (mlen > spd) move = (move / mlen) * spd;
+
+    // Attack: shoot when in range + cooldown ready
+    float attack_w = w_c * range_score * float(cooldown_is_ready(attack_cd)) * ammo_norm;
+    if (attack_w > 0.5) attack_cd = cooldown_start(2.0); // 2s between shots
+
+    outputs[idx].move_vector = vec4(move, max(w_c, max(w_r, w_f)));
+    outputs[idx].attack_target = vec4(player_pos, attack_w);
+    outputs[idx].animation_id = new_state;
+    outputs[idx].animation_blend = clamp(mlen / spd, 0.0, 1.0);
+    outputs[idx].sound_event = (attack_w > 0.5) ? 5u : 0u; // sniper shot
+    outputs[idx].sound_priority = attack_w;
+    outputs[idx].comms_signal = 0.0;
+    outputs[idx].comms_urgency = 0.0;
+
+    persist[idx].current_state = new_state;
+    persist[idx].state_timer = state_timer;
+    persist[idx].cooldown_0 = attack_cd;
+    persist[idx].last_decision = new_state;
+
+    debug_state_color(idx, new_state);
+}
