@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<mesh name="pillar" version="1">
+  <source format="primitive">cylinder</source>
+  <dimensions radius="0.5" height="3.0"/>
+  <lod_levels>
+    <lod distance="0" triangles="48"/>
+    <lod distance="30" triangles="16"/>
+  </lod_levels>
+  <collider type="capsule" radius="0.5" height="3.0"/>
+</mesh>

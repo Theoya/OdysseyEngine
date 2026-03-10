@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<prefab name="player" version="1">
+  <components>
+    <transform/>
+    <stats health="100" max_health="100" ammo="120" stamina="100" speed="8.0"/>
+    <behavior shader="player_input.nadir"/>
+    <render mesh="demo/materials/player.mesh.xml" material="demo/materials/player.mat.xml"/>
+    <collider type="capsule" radius="0.4" height="1.8"/>
+    <script class="PlayerController"/>
+  </components>
+</prefab>

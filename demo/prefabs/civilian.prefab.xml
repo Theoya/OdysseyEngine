@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<prefab name="civilian" version="1">
+  <components>
+    <transform/>
+    <stats health="30" max_health="30" speed="5.0"/>
+    <behavior shader="civilian_fleeing.nadir"/>
+    <render mesh="demo/materials/civilian.mesh.xml" material="demo/materials/civilian.mat.xml"/>
+    <collider type="capsule" radius="0.35" height="1.7"/>
+    <ai_state initial="IDLE"/>
+  </components>
+</prefab>

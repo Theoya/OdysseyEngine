@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<material name="civilian" version="1">
+  <shader vertex="shaders/pbr.vert" fragment="shaders/pbr.frag"/>
+  <properties>
+    <albedo>0.6 0.55 0.45 1.0</albedo>
+    <metallic>0.0</metallic>
+    <roughness>0.9</roughness>
+  </properties>
+</material>

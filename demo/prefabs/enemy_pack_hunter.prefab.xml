@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<prefab name="enemy_pack_hunter" version="1">
+  <components>
+    <transform/>
+    <stats health="60" max_health="60" ammo="30" stamina="80" speed="7.0"/>
+    <behavior shader="enemy_pack_hunter.nadir"/>
+    <render mesh="demo/materials/hunter.mesh.xml" material="demo/materials/enemy_dark.mat.xml"/>
+    <collider type="capsule" radius="0.4" height="1.8"/>
+    <ai_state initial="PATROL"/>
+  </components>
+</prefab>

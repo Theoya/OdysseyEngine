@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<prefab name="projectile" version="1">
+  <components>
+    <transform/>
+    <stats health="1" max_health="1" speed="50.0"/>
+    <behavior shader="projectile_physics.nadir"/>
+    <render mesh="demo/materials/bullet.mesh.xml" material="demo/materials/projectile.mat.xml"/>
+    <collider type="sphere" radius="0.1"/>
+    <ai_state initial="IDLE"/>
+  </components>
+</prefab>

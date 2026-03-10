@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<material name="enemy_dark" version="1">
+  <shader vertex="shaders/pbr.vert" fragment="shaders/pbr.frag"/>
+  <properties>
+    <albedo>0.2 0.15 0.15 1.0</albedo>
+    <metallic>0.1</metallic>
+    <roughness>0.8</roughness>
+  </properties>
+</material>

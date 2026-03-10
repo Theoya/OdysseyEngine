@@ -1,0 +1,101 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<scene name="shooter_arena" version="1">
+  <world>
+    <time_scale>1.0</time_scale>
+    <gravity>0 -9.81 0</gravity>
+  </world>
+
+  <!-- Player spawn -->
+  <entity id="player_1" archetype="player">
+    <transform position="0 1 0" rotation="0 0 0 1" scale="1 1 1"/>
+    <stats health="100" max_health="100" ammo="120"/>
+    <behavior shader="player_input.nadir"/>
+    <script class="PlayerController"/>
+  </entity>
+
+  <!-- Multi-Armed Gunner — the showcase enemy -->
+  <entity id="boss_gunner" archetype="multi_arm_gunner">
+    <transform position="30 1 30" rotation="0 0 0 1" scale="1.5 1.5 1.5"/>
+    <stats health="500" max_health="500" ammo="200" speed="4.0"/>
+    <behavior shader="multi_arm_gunner.nadir"/>
+  </entity>
+
+  <!-- Pack hunter squad — left flank -->
+  <entity id="hunters_left" archetype="enemy_pack_hunter" count="8">
+    <spawn_region type="circle" center="-25 0 20" radius="8"/>
+    <stats health="60" max_health="60" ammo="30" speed="7.0"/>
+    <behavior shader="enemy_pack_hunter.nadir"/>
+  </entity>
+
+  <!-- Pack hunter squad — right flank -->
+  <entity id="hunters_right" archetype="enemy_pack_hunter" count="8">
+    <spawn_region type="circle" center="25 0 20" radius="8"/>
+    <stats health="60" max_health="60" ammo="30" speed="7.0"/>
+    <behavior shader="enemy_pack_hunter.nadir"/>
+  </entity>
+
+  <!-- Ranged enemies — elevated positions -->
+  <entity id="snipers" archetype="enemy_ranged" count="4">
+    <spawn_region type="circle" center="0 5 40" radius="15"/>
+    <stats health="40" max_health="40" ammo="50" speed="3.0"/>
+    <behavior shader="enemy_ranged.nadir"/>
+  </entity>
+
+  <!-- Civilians — flee from combat -->
+  <entity id="civilians" archetype="civilian" count="12">
+    <spawn_region type="circle" center="0 0 0" radius="20"/>
+    <stats health="30" max_health="30" speed="5.0"/>
+    <behavior shader="civilian_fleeing.nadir"/>
+  </entity>
+
+  <!-- Cover objects -->
+  <entity id="cover_wall_1" archetype="static_cover">
+    <transform position="10 0 10" rotation="0 0 0 1"/>
+    <mesh src="demo/materials/wall_low.mesh.xml"/>
+  </entity>
+
+  <entity id="cover_wall_2" archetype="static_cover">
+    <transform position="-10 0 10" rotation="0 0.707 0 0.707"/>
+    <mesh src="demo/materials/wall_low.mesh.xml"/>
+  </entity>
+
+  <entity id="cover_crate_1" archetype="static_cover">
+    <transform position="5 0 20"/>
+    <mesh src="demo/materials/crate.mesh.xml"/>
+  </entity>
+
+  <entity id="cover_crate_2" archetype="static_cover">
+    <transform position="-5 0 20"/>
+    <mesh src="demo/materials/crate.mesh.xml"/>
+  </entity>
+
+  <entity id="cover_pillar_1" archetype="static_cover">
+    <transform position="15 0 25"/>
+    <mesh src="demo/materials/pillar.mesh.xml"/>
+  </entity>
+
+  <entity id="cover_pillar_2" archetype="static_cover">
+    <transform position="-15 0 25"/>
+    <mesh src="demo/materials/pillar.mesh.xml"/>
+  </entity>
+
+  <!-- Arena boundary walls -->
+  <entity id="wall_north" archetype="wall">
+    <transform position="0 2.5 50" scale="100 5 1"/>
+  </entity>
+  <entity id="wall_south" archetype="wall">
+    <transform position="0 2.5 -10" scale="100 5 1"/>
+  </entity>
+  <entity id="wall_east" archetype="wall">
+    <transform position="50 2.5 20" scale="1 5 60"/>
+  </entity>
+  <entity id="wall_west" archetype="wall">
+    <transform position="-50 2.5 20" scale="1 5 60"/>
+  </entity>
+
+  <!-- Game systems (C++ scripts) -->
+  <entity id="game_system" archetype="system">
+    <script class="GameManager"/>
+    <script class="HUD"/>
+  </entity>
+</scene>

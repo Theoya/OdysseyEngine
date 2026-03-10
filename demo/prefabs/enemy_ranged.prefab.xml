@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<prefab name="enemy_ranged" version="1">
+  <components>
+    <transform/>
+    <stats health="40" max_health="40" ammo="50" stamina="60" speed="3.0"/>
+    <behavior shader="enemy_ranged.nadir"/>
+    <render mesh="demo/materials/sniper.mesh.xml" material="demo/materials/enemy_dark.mat.xml"/>
+    <collider type="capsule" radius="0.35" height="1.8"/>
+    <ai_state initial="PATROL"/>
+  </components>
+</prefab>

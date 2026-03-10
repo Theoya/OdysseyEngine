@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<prefab name="multi_arm_gunner" version="1">
+  <components>
+    <transform/>
+    <stats health="500" max_health="500" ammo="200" stamina="100" speed="4.0"/>
+    <behavior shader="multi_arm_gunner.nadir"/>
+    <render mesh="demo/materials/gunner.mesh.xml" material="demo/materials/enemy_boss.mat.xml"/>
+    <collider type="capsule" radius="0.8" height="2.5"/>
+    <ai_state initial="COMBAT"/>
+  </components>
+</prefab>

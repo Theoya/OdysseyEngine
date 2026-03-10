@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<mesh name="hunter" version="1">
+  <source format="primitive">capsule</source>
+  <dimensions radius="0.4" height="1.8"/>
+  <lod_levels>
+    <lod distance="0" triangles="200"/>
+    <lod distance="40" triangles="64"/>
+    <lod distance="80" triangles="24"/>
+  </lod_levels>
+  <collider type="capsule" radius="0.4" height="1.8"/>
+</mesh>
