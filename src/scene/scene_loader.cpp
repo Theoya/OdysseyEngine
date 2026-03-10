@@ -1,0 +1,273 @@
+#include "scene/scene_loader.h"
+#include <pugixml.hpp>
+#include <spdlog/spdlog.h>
+#include <fstream>
+#include <sstream>
+#include <cmath>
+
+namespace odyssey::scene {
+
+vec3 parse_vec3(const std::string& str, vec3 default_val) {
+    if (str.empty()) return default_val;
+
+    std::istringstream iss(str);
+    vec3 result = default_val;
+    iss >> result.x >> result.y >> result.z;
+    return result;
+}
+
+quat parse_quat(const std::string& str, quat default_val) {
+    if (str.empty()) return default_val;
+
+    std::istringstream iss(str);
+    float x = 0.f, y = 0.f, z = 0.f, w = 1.f;
+    iss >> x >> y >> z >> w;
+    return quat{w, x, y, z};
+}
+
+static float parse_float(const char* str, float default_val) {
+    if (!str || str[0] == '\0') return default_val;
+    try {
+        return std::stof(str);
+    } catch (...) {
+        return default_val;
+    }
+}
+
+static uint32_t parse_uint(const char* str, uint32_t default_val) {
+    if (!str || str[0] == '\0') return default_val;
+    try {
+        return static_cast<uint32_t>(std::stoul(str));
+    } catch (...) {
+        return default_val;
+    }
+}
+
+Result<SceneData> parse_scene_xml(const std::string& xml_content) {
+    pugi::xml_document doc;
+    pugi::xml_parse_result parse_result = doc.load_string(xml_content.c_str());
+
+    if (!parse_result) {
+        return Result<SceneData>::err(
+            std::string("Failed to parse scene XML: ") + parse_result.description());
+    }
+
+    auto scene_node = doc.child("scene");
+    if (!scene_node) {
+        return Result<SceneData>::err("Missing root <scene> element");
+    }
+
+    SceneData scene;
+    scene.name = scene_node.attribute("name").as_string("unnamed");
+    scene.version = scene_node.attribute("version").as_int(1);
+
+    // Parse world settings
+    auto world_node = scene_node.child("world");
+    if (world_node) {
+        auto ts_node = world_node.child("time_scale");
+        if (ts_node) {
+            scene.time_scale = parse_float(ts_node.text().as_string(), 1.0f);
+        }
+
+        auto grav_node = world_node.child("gravity");
+        if (grav_node) {
+            scene.gravity = parse_vec3(grav_node.text().as_string(), vec3{0.0f, -9.81f, 0.0f});
+        }
+    }
+
+    // Parse entities
+    auto entities_node = scene_node.child("entities");
+    if (entities_node) {
+        for (auto entity_node : entities_node.children("entity")) {
+            SceneData::EntityDesc desc;
+
+            desc.id = entity_node.attribute("id").as_string("");
+            desc.archetype = entity_node.attribute("archetype").as_string("");
+            desc.count = entity_node.attribute("count").as_uint(1);
+
+            // Transform
+            auto transform_node = entity_node.child("transform");
+            if (transform_node) {
+                auto pos_node = transform_node.child("position");
+                if (pos_node) {
+                    desc.transform.position = parse_vec3(pos_node.text().as_string());
+                }
+                auto rot_node = transform_node.child("rotation");
+                if (rot_node) {
+                    desc.transform.rotation = parse_quat(rot_node.text().as_string());
+                }
+                auto scale_node = transform_node.child("scale");
+                if (scale_node) {
+                    desc.transform.scale = parse_vec3(scale_node.text().as_string(), vec3{1.f});
+                }
+            }
+
+            // Stats
+            auto stats_node = entity_node.child("stats");
+            if (stats_node) {
+                desc.stats.health = parse_float(
+                    stats_node.child("health").text().as_string(), 100.0f);
+                desc.stats.max_health = parse_float(
+                    stats_node.child("max_health").text().as_string(), desc.stats.health);
+                desc.stats.ammo = parse_float(
+                    stats_node.child("ammo").text().as_string(), 0.0f);
+                desc.stats.stamina = parse_float(
+                    stats_node.child("stamina").text().as_string(), 100.0f);
+                desc.stats.speed = parse_float(
+                    stats_node.child("speed").text().as_string(), 5.0f);
+            }
+
+            // Behavior shader
+            auto behavior_node = entity_node.child("behavior");
+            if (behavior_node) {
+                desc.behavior_shader = behavior_node.attribute("shader").as_string("");
+            }
+
+            // Mesh and material
+            auto mesh_node = entity_node.child("mesh");
+            if (mesh_node) {
+                desc.mesh_src = mesh_node.attribute("src").as_string("");
+            }
+
+            auto material_node = entity_node.child("material");
+            if (material_node) {
+                desc.material_src = material_node.attribute("src").as_string("");
+            }
+
+            // Script
+            auto script_node = entity_node.child("script");
+            if (script_node) {
+                desc.script_class = script_node.attribute("class").as_string("");
+                desc.script_config = script_node.attribute("config").as_string("");
+            }
+
+            // Spawn region
+            auto spawn_node = entity_node.child("spawn_region");
+            if (spawn_node) {
+                desc.spawn_type = spawn_node.attribute("type").as_string("");
+                auto center_node = spawn_node.child("center");
+                if (center_node) {
+                    desc.spawn_center = parse_vec3(center_node.text().as_string());
+                }
+                desc.spawn_radius = parse_float(
+                    spawn_node.child("radius").text().as_string(), 0.0f);
+            }
+
+            // Pack info
+            auto pack_node = entity_node.child("pack");
+            if (pack_node) {
+                desc.pack_leader = pack_node.attribute("leader").as_string("");
+            }
+
+            scene.entities.push_back(std::move(desc));
+        }
+    }
+
+    spdlog::info("Parsed scene '{}' with {} entity descriptors",
+                 scene.name, scene.entities.size());
+    return Result<SceneData>::ok(std::move(scene));
+}
+
+Result<SceneData> load_scene_file(const std::filesystem::path& path) {
+    if (!std::filesystem::exists(path)) {
+        return Result<SceneData>::err("Scene file not found: " + path.string());
+    }
+
+    std::ifstream file(path, std::ios::in);
+    if (!file.is_open()) {
+        return Result<SceneData>::err("Failed to open scene file: " + path.string());
+    }
+
+    std::ostringstream ss;
+    ss << file.rdbuf();
+    std::string content = ss.str();
+
+    spdlog::info("Loading scene from '{}'", path.string());
+    return parse_scene_xml(content);
+}
+
+void populate_entities(EntityManager& manager, const SceneData& scene) {
+    for (const auto& desc : scene.entities) {
+        if (desc.count <= 1) {
+            // Single entity
+            std::string name = desc.id.empty() ? desc.archetype : desc.id;
+            EntityID id = manager.create_entity(name, desc.archetype);
+
+            Entity* entity = manager.get_entity(id);
+            if (entity) {
+                entity->components.transform = desc.transform;
+                entity->components.stats = desc.stats;
+                entity->components.behavior_shader = desc.behavior_shader;
+                entity->components.mesh_path = desc.mesh_src;
+                entity->components.material_path = desc.material_src;
+                entity->components.script_class = desc.script_class;
+                entity->components.script_config = desc.script_config;
+            }
+        } else {
+            // Batch spawn
+            std::string prefix = desc.id.empty() ? desc.archetype : desc.id;
+            auto ids = manager.create_entities(desc.archetype, desc.count, prefix);
+
+            for (size_t i = 0; i < ids.size(); ++i) {
+                Entity* entity = manager.get_entity(ids[i]);
+                if (!entity) continue;
+
+                entity->components.transform = desc.transform;
+                entity->components.stats = desc.stats;
+                entity->components.behavior_shader = desc.behavior_shader;
+                entity->components.mesh_path = desc.mesh_src;
+                entity->components.material_path = desc.material_src;
+                entity->components.script_class = desc.script_class;
+                entity->components.script_config = desc.script_config;
+
+                // Offset positions for batch spawning within the spawn region
+                if (!desc.spawn_type.empty() && desc.spawn_radius > 0.0f) {
+                    float angle = (2.0f * 3.14159265f * static_cast<float>(i))
+                                  / static_cast<float>(desc.count);
+                    float radius_frac = desc.spawn_radius
+                                        * (static_cast<float>(i) + 1.0f)
+                                        / static_cast<float>(desc.count);
+
+                    if (desc.spawn_type == "circle") {
+                        entity->components.transform.position = desc.spawn_center
+                            + vec3{std::cos(angle) * radius_frac,
+                                   0.0f,
+                                   std::sin(angle) * radius_frac};
+                    } else {
+                        // Default: distribute linearly along x
+                        float offset = desc.spawn_radius * 2.0f
+                                        * (static_cast<float>(i) / static_cast<float>(desc.count))
+                                        - desc.spawn_radius;
+                        entity->components.transform.position = desc.spawn_center
+                            + vec3{offset, 0.0f, 0.0f};
+                    }
+                }
+            }
+        }
+    }
+
+    spdlog::info("Populated {} entities from scene data", manager.entity_count());
+}
+
+std::vector<std::filesystem::path> find_scene_files(const std::filesystem::path& dir) {
+    std::vector<std::filesystem::path> results;
+
+    if (!std::filesystem::exists(dir) || !std::filesystem::is_directory(dir)) {
+        spdlog::warn("Scene directory does not exist: {}", dir.string());
+        return results;
+    }
+
+    for (const auto& entry : std::filesystem::directory_iterator(dir)) {
+        if (!entry.is_regular_file()) continue;
+        std::string filename = entry.path().filename().string();
+        // Match *.scene.xml
+        if (filename.size() > 10 && filename.substr(filename.size() - 10) == ".scene.xml") {
+            results.push_back(entry.path());
+        }
+    }
+
+    spdlog::debug("Found {} scene files in '{}'", results.size(), dir.string());
+    return results;
+}
+
+} // namespace odyssey::scene
