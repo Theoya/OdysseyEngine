@@ -1,26 +1,50 @@
-#include <CLI/CLI.hpp>
+#include "cli/cli.h"
+#include "app/engine.h"
+
 #include <spdlog/spdlog.h>
-#include "core/types.h"
+
+#include <iostream>
 
 int main(int argc, char* argv[]) {
-    CLI::App app{"OdysseyEngine — GPU-maximalist 3D engine"};
+    spdlog::set_level(spdlog::level::info);
 
-    std::string config_path = "engine.xml";
-    app.add_option("-c,--config", config_path, "Path to engine.xml configuration file");
+    // --- CLI ---
+    auto cli_result = odyssey::cli::run_cli(argc, argv);
 
-    bool verbose = false;
-    app.add_flag("-v,--verbose", verbose, "Enable verbose logging");
-
-    CLI11_PARSE(app, argc, argv);
-
-    if (verbose) {
-        spdlog::set_level(spdlog::level::debug);
+    if (!cli_result.output.empty()) {
+        std::cout << cli_result.output << std::endl;
     }
 
-    spdlog::info("OdysseyEngine v{}.{}.{}", 0, 1, 0);
-    spdlog::info("Config: {}", config_path);
+    // If the CLI already resolved (build, test, nadir, scene) just exit.
+    if (!cli_result.should_run_engine) {
+        return cli_result.exit_code;
+    }
 
-    // Engine initialization will go here in future phases.
+    // --- Engine ---
+    // Parse the engine config file.
+    auto config_result = odyssey::parse_engine_config("engine.xml");
+    if (config_result.is_err()) {
+        spdlog::error("Failed to parse engine config: {}", config_result.error());
+        return 1;
+    }
+
+    auto config = config_result.value();
+
+    // Apply any CLI overrides.
+    if (!cli_result.scene_path.empty()) {
+        spdlog::info("Scene override from CLI: {}", cli_result.scene_path);
+    }
+
+    // Boot the engine.
+    odyssey::Engine engine;
+    auto init_result = engine.initialize(config);
+    if (init_result.is_err()) {
+        spdlog::error("Engine initialization failed: {}", init_result.error());
+        return 1;
+    }
+
+    engine.run();
+    engine.shutdown();
 
     return 0;
 }
