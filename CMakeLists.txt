@@ -28,11 +28,31 @@ find_package(CLI11 CONFIG REQUIRED)
 find_package(GTest CONFIG REQUIRED)
 
 # ── Gather sources for the engine library ────────────────────────────────────
-file(GLOB_RECURSE CORE_SOURCES   CONFIGURE_DEPENDS "src/core/*.cpp"   "src/core/*.h")
-file(GLOB_RECURSE VULKAN_SOURCES CONFIGURE_DEPENDS "src/vulkan/*.cpp" "src/vulkan/*.h")
-file(GLOB_RECURSE NADIR_SOURCES  CONFIGURE_DEPENDS "src/nadir/*.cpp"  "src/nadir/*.h")
+file(GLOB_RECURSE CORE_SOURCES      CONFIGURE_DEPENDS "src/core/*.cpp"      "src/core/*.h")
+file(GLOB_RECURSE VULKAN_SOURCES    CONFIGURE_DEPENDS "src/vulkan/*.cpp"    "src/vulkan/*.h")
+file(GLOB_RECURSE NADIR_SOURCES     CONFIGURE_DEPENDS "src/nadir/*.cpp"     "src/nadir/*.h")
+file(GLOB_RECURSE SCENE_SOURCES     CONFIGURE_DEPENDS "src/scene/*.cpp"     "src/scene/*.h")
+file(GLOB_RECURSE ASSETS_SOURCES    CONFIGURE_DEPENDS "src/assets/*.cpp"    "src/assets/*.h")
+file(GLOB_RECURSE SCRIPTING_SOURCES CONFIGURE_DEPENDS "src/scripting/*.cpp" "src/scripting/*.h")
+file(GLOB_RECURSE CLI_SOURCES       CONFIGURE_DEPENDS "src/cli/*.cpp"       "src/cli/*.h")
+file(GLOB_RECURSE APP_SOURCES       CONFIGURE_DEPENDS "src/app/engine.cpp"  "src/app/engine.h")
+file(GLOB_RECURSE NET_SOURCES       CONFIGURE_DEPENDS "src/net/*.cpp"       "src/net/*.h")
+file(GLOB_RECURSE MCP_SOURCES       CONFIGURE_DEPENDS "src/mcp/*.cpp"       "src/mcp/*.h")
+file(GLOB_RECURSE DEBUG_SOURCES     CONFIGURE_DEPENDS "src/debug/*.cpp"     "src/debug/*.h")
 
-set(ENGINE_SOURCES ${CORE_SOURCES} ${VULKAN_SOURCES} ${NADIR_SOURCES})
+set(ENGINE_SOURCES
+    ${CORE_SOURCES}
+    ${VULKAN_SOURCES}
+    ${NADIR_SOURCES}
+    ${SCENE_SOURCES}
+    ${ASSETS_SOURCES}
+    ${SCRIPTING_SOURCES}
+    ${CLI_SOURCES}
+    ${APP_SOURCES}
+    ${NET_SOURCES}
+    ${MCP_SOURCES}
+    ${DEBUG_SOURCES}
+)
 
 # ── Engine static library ───────────────────────────────────────────────────
 add_library(odyssey_engine STATIC ${ENGINE_SOURCES})
@@ -51,7 +71,13 @@ target_link_libraries(odyssey_engine
     spdlog::spdlog
     unofficial::shaderc::shaderc
     pugixml::pugixml
+    CLI11::CLI11
 )
+
+# Windows: link Winsock2 for networking and MCP
+if(WIN32)
+  target_link_libraries(odyssey_engine PUBLIC ws2_32)
+endif()
 
 # ── Main executable ─────────────────────────────────────────────────────────
 add_executable(odyssey src/app/main.cpp)
@@ -59,7 +85,6 @@ add_executable(odyssey src/app/main.cpp)
 target_link_libraries(odyssey
   PRIVATE
     odyssey_engine
-    CLI11::CLI11
 )
 
 # ── Tests ────────────────────────────────────────────────────────────────────
@@ -88,16 +113,27 @@ if(PIPELINE_TEST_SOURCES)
   add_test(NAME pipeline_tests COMMAND odyssey_tests_pipeline)
 endif()
 
-# ── Copy behaviors/ to build output ─────────────────────────────────────────
-add_custom_target(copy_behaviors ALL
+# ── Copy runtime assets to build output ───────────────────────────────────────
+add_custom_target(copy_assets ALL
   COMMAND ${CMAKE_COMMAND} -E copy_directory
     "${CMAKE_CURRENT_SOURCE_DIR}/behaviors"
     "${CMAKE_CURRENT_BINARY_DIR}/behaviors"
-  COMMENT "Copying behaviors/ to build directory"
+  COMMAND ${CMAKE_COMMAND} -E copy_directory
+    "${CMAKE_CURRENT_SOURCE_DIR}/demo"
+    "${CMAKE_CURRENT_BINARY_DIR}/demo"
+  COMMAND ${CMAKE_COMMAND} -E copy_directory
+    "${CMAKE_CURRENT_SOURCE_DIR}/shaders"
+    "${CMAKE_CURRENT_BINARY_DIR}/shaders"
+  COMMAND ${CMAKE_COMMAND} -E copy_directory
+    "${CMAKE_CURRENT_SOURCE_DIR}/schemas"
+    "${CMAKE_CURRENT_BINARY_DIR}/schemas"
+  COMMAND ${CMAKE_COMMAND} -E copy_if_different
+    "${CMAKE_CURRENT_SOURCE_DIR}/engine.xml"
+    "${CMAKE_CURRENT_BINARY_DIR}/engine.xml"
+  COMMENT "Copying runtime assets to build directory"
 )
 
-# Ensure behaviors are copied before the main executable runs
-add_dependencies(odyssey copy_behaviors)
+add_dependencies(odyssey copy_assets)
 
 # ── Windows: help find Vulkan SDK ────────────────────────────────────────────
 if(WIN32 AND DEFINED ENV{VULKAN_SDK})
