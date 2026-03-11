@@ -35,7 +35,8 @@ file(GLOB_RECURSE SCENE_SOURCES     CONFIGURE_DEPENDS "src/scene/*.cpp"     "src
 file(GLOB_RECURSE ASSETS_SOURCES    CONFIGURE_DEPENDS "src/assets/*.cpp"    "src/assets/*.h")
 file(GLOB_RECURSE SCRIPTING_SOURCES CONFIGURE_DEPENDS "src/scripting/*.cpp" "src/scripting/*.h")
 file(GLOB_RECURSE CLI_SOURCES       CONFIGURE_DEPENDS "src/cli/*.cpp"       "src/cli/*.h")
-file(GLOB_RECURSE APP_SOURCES       CONFIGURE_DEPENDS "src/app/engine.cpp"  "src/app/engine.h")
+file(GLOB_RECURSE APP_SOURCES       CONFIGURE_DEPENDS "src/app/*.cpp"       "src/app/*.h")
+list(FILTER APP_SOURCES EXCLUDE REGEX "main\\.cpp$")
 file(GLOB_RECURSE NET_SOURCES       CONFIGURE_DEPENDS "src/net/*.cpp"       "src/net/*.h")
 file(GLOB_RECURSE MCP_SOURCES       CONFIGURE_DEPENDS "src/mcp/*.cpp"       "src/mcp/*.h")
 file(GLOB_RECURSE DEBUG_SOURCES     CONFIGURE_DEPENDS "src/debug/*.cpp"     "src/debug/*.h")
@@ -79,8 +80,17 @@ if(WIN32)
   target_link_libraries(odyssey_engine PUBLIC ws2_32)
 endif()
 
-# ── Main executable ─────────────────────────────────────────────────────────
-add_executable(odyssey src/app/main.cpp)
+# ── Main executable (engine + game) ──────────────────────────────────────────
+# Game sources live outside the engine library — this is the key separation.
+# To create a new game, replace these with your own game files.
+file(GLOB_RECURSE GAME_SOURCES CONFIGURE_DEPENDS "demo/*.cpp" "demo/*.h")
+
+add_executable(odyssey src/app/main.cpp ${GAME_SOURCES})
+
+target_include_directories(odyssey
+  PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/demo
+)
 
 target_link_libraries(odyssey
   PRIVATE

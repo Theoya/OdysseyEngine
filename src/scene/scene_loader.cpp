@@ -75,92 +75,83 @@ Result<SceneData> parse_scene_xml(const std::string& xml_content) {
         }
     }
 
-    // Parse entities
-    auto entities_node = scene_node.child("entities");
-    if (entities_node) {
-        for (auto entity_node : entities_node.children("entity")) {
-            SceneData::EntityDesc desc;
+    // Parse entities — <entity> nodes directly under <scene>
+    for (auto entity_node : scene_node.children("entity")) {
+        SceneData::EntityDesc desc;
 
-            desc.id = entity_node.attribute("id").as_string("");
-            desc.archetype = entity_node.attribute("archetype").as_string("");
-            desc.count = entity_node.attribute("count").as_uint(1);
+        desc.id = entity_node.attribute("id").as_string("");
+        desc.archetype = entity_node.attribute("archetype").as_string("");
+        desc.count = entity_node.attribute("count").as_uint(1);
 
-            // Transform
-            auto transform_node = entity_node.child("transform");
-            if (transform_node) {
-                auto pos_node = transform_node.child("position");
-                if (pos_node) {
-                    desc.transform.position = parse_vec3(pos_node.text().as_string());
-                }
-                auto rot_node = transform_node.child("rotation");
-                if (rot_node) {
-                    desc.transform.rotation = parse_quat(rot_node.text().as_string());
-                }
-                auto scale_node = transform_node.child("scale");
-                if (scale_node) {
-                    desc.transform.scale = parse_vec3(scale_node.text().as_string(), vec3{1.f});
-                }
+        // Transform — attributes: position="x y z" rotation="x y z w" scale="x y z"
+        auto transform_node = entity_node.child("transform");
+        if (transform_node) {
+            auto pos_attr = transform_node.attribute("position");
+            if (pos_attr) {
+                desc.transform.position = parse_vec3(pos_attr.as_string());
             }
-
-            // Stats
-            auto stats_node = entity_node.child("stats");
-            if (stats_node) {
-                desc.stats.health = parse_float(
-                    stats_node.child("health").text().as_string(), 100.0f);
-                desc.stats.max_health = parse_float(
-                    stats_node.child("max_health").text().as_string(), desc.stats.health);
-                desc.stats.ammo = parse_float(
-                    stats_node.child("ammo").text().as_string(), 0.0f);
-                desc.stats.stamina = parse_float(
-                    stats_node.child("stamina").text().as_string(), 100.0f);
-                desc.stats.speed = parse_float(
-                    stats_node.child("speed").text().as_string(), 5.0f);
+            auto rot_attr = transform_node.attribute("rotation");
+            if (rot_attr) {
+                desc.transform.rotation = parse_quat(rot_attr.as_string());
             }
-
-            // Behavior shader
-            auto behavior_node = entity_node.child("behavior");
-            if (behavior_node) {
-                desc.behavior_shader = behavior_node.attribute("shader").as_string("");
+            auto scale_attr = transform_node.attribute("scale");
+            if (scale_attr) {
+                desc.transform.scale = parse_vec3(scale_attr.as_string(), vec3{1.f});
             }
-
-            // Mesh and material
-            auto mesh_node = entity_node.child("mesh");
-            if (mesh_node) {
-                desc.mesh_src = mesh_node.attribute("src").as_string("");
-            }
-
-            auto material_node = entity_node.child("material");
-            if (material_node) {
-                desc.material_src = material_node.attribute("src").as_string("");
-            }
-
-            // Script
-            auto script_node = entity_node.child("script");
-            if (script_node) {
-                desc.script_class = script_node.attribute("class").as_string("");
-                desc.script_config = script_node.attribute("config").as_string("");
-            }
-
-            // Spawn region
-            auto spawn_node = entity_node.child("spawn_region");
-            if (spawn_node) {
-                desc.spawn_type = spawn_node.attribute("type").as_string("");
-                auto center_node = spawn_node.child("center");
-                if (center_node) {
-                    desc.spawn_center = parse_vec3(center_node.text().as_string());
-                }
-                desc.spawn_radius = parse_float(
-                    spawn_node.child("radius").text().as_string(), 0.0f);
-            }
-
-            // Pack info
-            auto pack_node = entity_node.child("pack");
-            if (pack_node) {
-                desc.pack_leader = pack_node.attribute("leader").as_string("");
-            }
-
-            scene.entities.push_back(std::move(desc));
         }
+
+        // Stats — attributes: health="100" max_health="100" ammo="30" speed="7.0"
+        auto stats_node = entity_node.child("stats");
+        if (stats_node) {
+            desc.stats.health = stats_node.attribute("health").as_float(100.0f);
+            desc.stats.max_health = stats_node.attribute("max_health").as_float(desc.stats.health);
+            desc.stats.ammo = stats_node.attribute("ammo").as_float(0.0f);
+            desc.stats.stamina = stats_node.attribute("stamina").as_float(100.0f);
+            desc.stats.speed = stats_node.attribute("speed").as_float(5.0f);
+        }
+
+        // Behavior shader — <behavior shader="name.nadir"/>
+        auto behavior_node = entity_node.child("behavior");
+        if (behavior_node) {
+            desc.behavior_shader = behavior_node.attribute("shader").as_string("");
+        }
+
+        // Mesh and material
+        auto mesh_node = entity_node.child("mesh");
+        if (mesh_node) {
+            desc.mesh_src = mesh_node.attribute("src").as_string("");
+        }
+
+        auto material_node = entity_node.child("material");
+        if (material_node) {
+            desc.material_src = material_node.attribute("src").as_string("");
+        }
+
+        // Script
+        auto script_node = entity_node.child("script");
+        if (script_node) {
+            desc.script_class = script_node.attribute("class").as_string("");
+            desc.script_config = script_node.attribute("config").as_string("");
+        }
+
+        // Spawn region — attributes: type="circle" center="x y z" radius="r"
+        auto spawn_node = entity_node.child("spawn_region");
+        if (spawn_node) {
+            desc.spawn_type = spawn_node.attribute("type").as_string("");
+            auto center_attr = spawn_node.attribute("center");
+            if (center_attr) {
+                desc.spawn_center = parse_vec3(center_attr.as_string());
+            }
+            desc.spawn_radius = spawn_node.attribute("radius").as_float(0.0f);
+        }
+
+        // Pack info
+        auto pack_node = entity_node.child("pack");
+        if (pack_node) {
+            desc.pack_leader = pack_node.attribute("leader").as_string("");
+        }
+
+        scene.entities.push_back(std::move(desc));
     }
 
     spdlog::info("Parsed scene '{}' with {} entity descriptors",

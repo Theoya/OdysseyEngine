@@ -1,6 +1,9 @@
 // steering.glsl — Steering behaviors for movement
 // Include via: #include "steering.glsl"
 
+#ifndef STEERING_GLSL
+#define STEERING_GLSL
+
 // Seek: move toward target position
 vec3 steer_seek(vec3 current_pos, vec3 target_pos, float max_speed) {
     vec3 desired = target_pos - current_pos;
@@ -94,3 +97,5 @@ vec3 direction_to(vec3 from, vec3 to) {
 float distance_to(vec3 a, vec3 b) {
     return length(b - a);
 }
+
+#endif // STEERING_GLSL

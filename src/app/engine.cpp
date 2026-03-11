@@ -7,10 +7,7 @@
 #include <chrono>
 
 // ---------------------------------------------------------------------------
-// Vulkan / Nadir headers — pulled in only inside this translation unit.
-// Phase 1: we include the interface headers that other agents will provide.
-// Until those exist we guard with __has_include so the file compiles
-// standalone for the CLI-only build.
+// Vulkan / Nadir / Rendering headers
 // ---------------------------------------------------------------------------
 
 #if __has_include("vulkan/instance.h")
@@ -20,6 +17,8 @@
 #   include "vulkan/buffer.h"
 #   include "vulkan/command.h"
 #   include "vulkan/compute_pipeline.h"
+#   include "vulkan/renderer.h"
+#   include "vulkan/postprocess.h"
 #   define ODYSSEY_HAS_VULKAN 1
 #else
 #   define ODYSSEY_HAS_VULKAN 0
@@ -46,10 +45,17 @@
 #   define ODYSSEY_HAS_PUGIXML 0
 #endif
 
+#include "app/camera.h"
+#include "app/input.h"
+#include "app/game.h"
+#include "scene/entity_manager.h"
+
+#include <glm/gtc/matrix_transform.hpp>
+
 namespace odyssey {
 
 // ---------------------------------------------------------------------------
-// Pimpl — holds Vulkan and Nadir runtime state.
+// Pimpl — holds all runtime state.
 // ---------------------------------------------------------------------------
 
 struct Engine::Impl {
@@ -63,11 +69,21 @@ struct Engine::Impl {
     std::vector<VkCommandBuffer>      command_buffers;
     std::vector<vulkan::FrameSync>    frame_sync;
     VkDescriptorPool                  descriptor_pool = VK_NULL_HANDLE;
+
+    vulkan::Renderer                  renderer;
+    vulkan::PostProcessor             postprocessor;
+    bool                              has_postprocessor = false;
 #endif
 
 #if ODYSSEY_HAS_NADIR
     nadir::NadirSystem                nadir_system;
 #endif
+
+    Camera                            camera;
+    InputManager                      input;
+    scene::EntityManager              entity_mgr;
+    EngineConfig                      config;
+    std::unique_ptr<Game>             game;
 };
 
 // ---------------------------------------------------------------------------
@@ -141,8 +157,11 @@ Engine::~Engine() {
 // initialize
 // ---------------------------------------------------------------------------
 
-Result<bool> Engine::initialize(const EngineConfig& config) {
+Result<bool> Engine::initialize(const EngineConfig& config,
+                                std::unique_ptr<Game> game) {
     impl_ = std::make_unique<Impl>();
+    impl_->config = config;
+    impl_->game = std::move(game);
 
     spdlog::info("Initializing OdysseyEngine");
     spdlog::info("  Window   : {}x{} \"{}\"", config.window_width,
@@ -159,6 +178,34 @@ Result<bool> Engine::initialize(const EngineConfig& config) {
 
     auto nadir_result = init_nadir(config);
     if (nadir_result.is_err()) return Result<bool>::err(nadir_result.error());
+
+    // Initialize input manager
+#if ODYSSEY_HAS_GLFW
+    if (window_) {
+        impl_->input.initialize(window_);
+    }
+#endif
+
+    // Initialize game (if provided)
+    if (impl_->game) {
+        GameContext ctx{};
+        ctx.camera = &impl_->camera;
+        ctx.input = &impl_->input;
+        ctx.entity_mgr = &impl_->entity_mgr;
+#if ODYSSEY_HAS_NADIR
+        ctx.nadir_sys = &impl_->nadir_system;
+#endif
+        ctx.window = window_;
+        ctx.scene_path = config.scene_path;
+
+        auto game_res = impl_->game->on_init(ctx);
+        if (game_res.is_err()) {
+            spdlog::warn("Game init failed: {}", game_res.error());
+        } else {
+            spdlog::info("Game initialized: {} renderables",
+                         impl_->game->get_renderables().size());
+        }
+    }
 
     running_ = true;
     spdlog::info("Engine initialization complete");
@@ -192,10 +239,9 @@ Result<bool> Engine::init_window(const EngineConfig& config) {
     // Store a user pointer so callbacks can reach the Engine.
     glfwSetWindowUserPointer(window_, this);
 
-    // Framebuffer resize callback — sets a flag for swapchain recreation.
+    // Framebuffer resize callback
     glfwSetFramebufferSizeCallback(window_,
-        [](GLFWwindow* w, int /*width*/, int /*height*/) {
-            // In a full implementation this triggers swapchain recreation.
+        [](GLFWwindow* /*w*/, int /*width*/, int /*height*/) {
             spdlog::info("Framebuffer resized");
         });
 
@@ -226,20 +272,17 @@ Result<bool> Engine::init_vulkan(const EngineConfig& config) {
         return Result<bool>::err("Failed to create Vulkan surface");
     }
 
-    // 3. Device
-    vulkan::DeviceConfig dev_cfg{};
-    dev_cfg.instance        = impl_->instance;
-    dev_cfg.surface         = impl_->surface;
-    dev_cfg.preferred_index = config.gpu_index;
-    auto dev_res = vulkan::create_device(dev_cfg);
+    // 3. Device — select physical device then create logical device
+    auto dev_cfg = vulkan::select_physical_device(
+        impl_->instance, impl_->surface, config.gpu_index);
+    auto dev_res = vulkan::create_device(dev_cfg, impl_->instance);
     if (dev_res.is_err()) return Result<bool>::err(dev_res.error());
     impl_->device_ctx = dev_res.value();
 
-    // 4. Swapchain
-    vulkan::SwapchainConfig sc_cfg{};
-    sc_cfg.desired_width  = config.window_width;
-    sc_cfg.desired_height = config.window_height;
-    sc_cfg.vsync          = config.vsync;
+    // 4. Swapchain — compute config from surface capabilities
+    auto sc_cfg = vulkan::compute_swapchain_config(
+        impl_->device_ctx.physical_device, impl_->surface,
+        config.window_width, config.window_height, config.vsync);
     auto sc_res = vulkan::create_swapchain(impl_->device_ctx,
                                            impl_->surface, sc_cfg);
     if (sc_res.is_err()) return Result<bool>::err(sc_res.error());
@@ -248,7 +291,7 @@ Result<bool> Engine::init_vulkan(const EngineConfig& config) {
     // 5. Command pool + buffers
     auto pool_res = vulkan::create_command_pool(
         impl_->device_ctx.device,
-        impl_->device_ctx.queue_families.graphics,
+        impl_->device_ctx.queue_families.graphics.value(),
         VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT);
     if (pool_res.is_err()) return Result<bool>::err(pool_res.error());
     impl_->command_pool = pool_res.value();
@@ -265,6 +308,59 @@ Result<bool> Engine::init_vulkan(const EngineConfig& config) {
         auto sync_res = vulkan::create_frame_sync(impl_->device_ctx.device);
         if (sync_res.is_err()) return Result<bool>::err(sync_res.error());
         impl_->frame_sync[i] = sync_res.value();
+    }
+
+    // 7. Descriptor pool for Nadir
+    {
+        VkDescriptorPoolSize pool_sizes[] = {
+            { VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 6 * 64 },
+            { VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1 * 64 },
+        };
+        VkDescriptorPoolCreateInfo pool_info{};
+        pool_info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
+        pool_info.maxSets = 64;
+        pool_info.poolSizeCount = 2;
+        pool_info.pPoolSizes = pool_sizes;
+        VkResult vr2 = vkCreateDescriptorPool(impl_->device_ctx.device,
+                                               &pool_info, nullptr,
+                                               &impl_->descriptor_pool);
+        if (vr2 != VK_SUCCESS) {
+            return Result<bool>::err("Failed to create descriptor pool");
+        }
+    }
+
+    // 8. PostProcessor — creates offscreen render target, scene render pass
+    {
+        auto pp_res = impl_->postprocessor.initialize(
+            impl_->device_ctx,
+            impl_->swapchain_ctx.extent,
+            impl_->swapchain_ctx.format,
+            impl_->command_pool,
+            config.shader_dir);
+        if (pp_res.is_err()) {
+            spdlog::warn("PostProcessor init failed: {} — falling back to direct rendering",
+                         pp_res.error());
+            impl_->has_postprocessor = false;
+        } else {
+            // Provide swapchain image views so post framebuffers can be created
+            auto sv_res = impl_->postprocessor.set_swapchain_views(
+                impl_->swapchain_ctx.image_views, impl_->swapchain_ctx.extent);
+            if (sv_res.is_err()) {
+                spdlog::warn("PostProcessor swapchain views failed: {}", sv_res.error());
+                impl_->postprocessor.shutdown();
+                impl_->has_postprocessor = false;
+            } else {
+                impl_->has_postprocessor = true;
+                spdlog::info("PostProcessor ready (CRT + EVA HUD)");
+            }
+        }
+    }
+
+    // 9. Renderer — creates graphics pipeline, primitive meshes
+    {
+        auto ren_res = impl_->renderer.initialize(
+            impl_->device_ctx, impl_->swapchain_ctx, impl_->command_pool);
+        if (ren_res.is_err()) return Result<bool>::err(ren_res.error());
     }
 
     spdlog::info("Vulkan initialized");
@@ -296,7 +392,6 @@ Result<bool> Engine::init_nadir(const EngineConfig& config) {
     auto load_res = impl_->nadir_system.load_behaviors();
     if (load_res.is_err()) {
         spdlog::warn("Nadir load_behaviors: {}", load_res.error());
-        // Non-fatal — hot-reload can pick them up later.
     }
 
     spdlog::info("Nadir system initialized ({} archetypes)",
@@ -329,6 +424,9 @@ void Engine::run() {
         float delta = static_cast<float>(current_time - last_time_);
         last_time_ = current_time;
 
+        // Cap delta to avoid physics explosions on debugger pauses
+        if (delta > 0.1f) delta = 0.1f;
+
         process_frame(delta);
     }
 
@@ -351,12 +449,47 @@ void Engine::run() {
 void Engine::process_frame(float delta_time) {
     total_time_ += delta_time;
 
-#if ODYSSEY_HAS_VULKAN && ODYSSEY_HAS_NADIR
+    // --- Input ---
+    impl_->input.update();
+
+    // --- Camera ---
+    if (impl_->input.is_cursor_captured()) {
+        vec2 md = impl_->input.mouse_delta();
+        impl_->camera.update(
+            delta_time,
+            impl_->input.is_key_down(GLFW_KEY_W),
+            impl_->input.is_key_down(GLFW_KEY_S),
+            impl_->input.is_key_down(GLFW_KEY_A),
+            impl_->input.is_key_down(GLFW_KEY_D),
+            impl_->input.is_key_down(GLFW_KEY_SPACE),
+            impl_->input.is_key_down(GLFW_KEY_LEFT_SHIFT),
+            md.x, md.y);
+    }
+
+    // --- Game tick ---
+    if (impl_->game) {
+        GameContext ctx{};
+        ctx.delta_time = delta_time;
+        ctx.total_time = total_time_;
+        ctx.camera = &impl_->camera;
+        ctx.input = &impl_->input;
+        ctx.entity_mgr = &impl_->entity_mgr;
+#if ODYSSEY_HAS_NADIR
+        ctx.nadir_sys = &impl_->nadir_system;
+#endif
+        ctx.window = window_;
+        ctx.scene_path = impl_->config.scene_path;
+        impl_->game->on_tick(ctx);
+    }
+
+#if ODYSSEY_HAS_VULKAN
     // --- Hot-reload check ---
+#if ODYSSEY_HAS_NADIR
     auto changed = impl_->nadir_system.check_hot_reload();
     if (!changed.empty()) {
         spdlog::info("Hot-reloaded {} behavior(s)", changed.size());
     }
+#endif
 
     // --- Acquire image ---
     auto& sync = impl_->frame_sync[current_frame_];
@@ -370,7 +503,6 @@ void Engine::process_frame(float delta_time) {
         sync.image_available, VK_NULL_HANDLE, &image_index);
 
     if (acquire == VK_ERROR_OUT_OF_DATE_KHR) {
-        // Swapchain recreation would go here.
         return;
     }
 
@@ -383,12 +515,60 @@ void Engine::process_frame(float delta_time) {
     vkBeginCommandBuffer(cmd, &begin_info);
 
     // Nadir compute dispatches
+#if ODYSSEY_HAS_NADIR
     impl_->nadir_system.record_dispatches(cmd);
+#endif
+
+    // --- Build view-projection matrix ---
+    float aspect = static_cast<float>(impl_->swapchain_ctx.extent.width)
+                 / static_cast<float>(impl_->swapchain_ctx.extent.height);
+    mat4 vp = impl_->camera.vp_matrix(aspect);
+
+    // --- Render scene ---
+    if (impl_->has_postprocessor) {
+        // Render into PostProcessor's offscreen target
+        auto bf_res = impl_->renderer.begin_frame_offscreen(
+            impl_->postprocessor.scene_render_pass(),
+            impl_->postprocessor.scene_framebuffer(),
+            impl_->swapchain_ctx.extent,
+            cmd);
+        if (bf_res.is_ok()) {
+            render_entities(vp);
+            impl_->renderer.end_frame(cmd);
+
+            // Apply CRT + EVA HUD post-processing → swapchain
+            // Get HUD params from game (or use defaults)
+            HUDParams hud = impl_->game ? impl_->game->get_hud_params() : HUDParams{};
+
+            vulkan::EvaHUDParams eva{};
+            eva.time = total_time_;
+            eva.health_pct = hud.health_pct;
+            eva.alert_level = hud.alert_level;
+            eva.sync_ratio = hud.sync_ratio;
+
+            vulkan::CRTParams crt{};
+            crt.time = total_time_;
+            crt.brightness = 1.2f + hud.brightness_boost;
+            crt.chromatic_aberration = 1.0f + hud.chromatic_boost;
+            crt.flicker_amount = 0.2f + hud.flicker_boost;
+            crt.curvature = 2.0f + hud.curvature_boost;
+            crt.vignette_strength = 0.8f + hud.vignette_boost;
+
+            impl_->postprocessor.apply(cmd, image_index, crt, eva);
+        }
+    } else {
+        // Direct render to swapchain (no post-processing)
+        auto bf_res = impl_->renderer.begin_frame(image_index, cmd);
+        if (bf_res.is_ok()) {
+            render_entities(vp);
+            impl_->renderer.end_frame(cmd);
+        }
+    }
 
     vkEndCommandBuffer(cmd);
 
     // --- Submit ---
-    VkPipelineStageFlags wait_stage = VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT;
+    VkPipelineStageFlags wait_stage = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
     VkSubmitInfo submit_info{};
     submit_info.sType                = VK_STRUCTURE_TYPE_SUBMIT_INFO;
     submit_info.waitSemaphoreCount   = 1;
@@ -399,7 +579,7 @@ void Engine::process_frame(float delta_time) {
     submit_info.signalSemaphoreCount = 1;
     submit_info.pSignalSemaphores    = &sync.render_finished;
 
-    vkQueueSubmit(impl_->device_ctx.compute_queue, 1, &submit_info,
+    vkQueueSubmit(impl_->device_ctx.graphics_queue, 1, &submit_info,
                   sync.in_flight);
 
     // --- Present ---
@@ -414,8 +594,51 @@ void Engine::process_frame(float delta_time) {
     vkQueuePresentKHR(impl_->device_ctx.present_queue, &present_info);
 
     current_frame_ = (current_frame_ + 1) % vulkan::MAX_FRAMES_IN_FLIGHT;
+
+    // --- Update window title from game HUD ---
+    if (impl_->game) {
+        auto hud = impl_->game->get_hud_params();
+        if (!hud.window_title.empty()) {
+            glfwSetWindowTitle(window_, hud.window_title.c_str());
+        }
+    }
 #else
     (void)delta_time;
+#endif
+}
+
+// ---------------------------------------------------------------------------
+// render_entities — draw all scene renderables
+// ---------------------------------------------------------------------------
+
+void Engine::render_entities(const mat4& vp) {
+#if ODYSSEY_HAS_VULKAN
+    if (!impl_->game) return;
+
+    const auto& renderables = impl_->game->get_renderables();
+
+    for (const auto& entity : renderables) {
+        if (entity.scale <= 0.f) continue;
+
+        mat4 model = glm::translate(mat4(1.0f), entity.position);
+        model = glm::scale(model, vec3(entity.scale));
+
+        mat4 mvp = vp * model;
+
+        auto mesh_type = static_cast<vulkan::PrimitiveType>(entity.mesh_type);
+        impl_->renderer.draw(mvp, entity.color, mesh_type);
+    }
+
+    // Crosshair
+    vec3 crosshair_pos = impl_->camera.position()
+        + impl_->camera.front() * 3.0f;
+    mat4 crosshair_model = glm::translate(mat4(1.0f), crosshair_pos);
+    crosshair_model = glm::scale(crosshair_model, vec3(0.02f));
+    mat4 crosshair_mvp = vp * crosshair_model;
+    impl_->renderer.draw(crosshair_mvp, {1.0f, 1.0f, 1.0f, 1.0f},
+                         vulkan::PrimitiveType::SPHERE);
+#else
+    (void)vp;
 #endif
 }
 
@@ -426,6 +649,10 @@ void Engine::process_frame(float delta_time) {
 void Engine::shutdown() {
     spdlog::info("Shutting down engine");
     running_ = false;
+
+    if (impl_ && impl_->game) {
+        impl_->game->on_shutdown();
+    }
 
     shutdown_nadir();
     shutdown_vulkan();
@@ -452,11 +679,24 @@ void Engine::shutdown_vulkan() {
 
     vkDeviceWaitIdle(dev);
 
+    // Renderer
+    impl_->renderer.shutdown();
+
+    // PostProcessor
+    if (impl_->has_postprocessor) {
+        impl_->postprocessor.shutdown();
+    }
+
     // Sync objects
     for (auto& s : impl_->frame_sync) {
         vkDestroySemaphore(dev, s.image_available, nullptr);
         vkDestroySemaphore(dev, s.render_finished, nullptr);
         vkDestroyFence(dev, s.in_flight, nullptr);
+    }
+
+    // Descriptor pool
+    if (impl_->descriptor_pool != VK_NULL_HANDLE) {
+        vkDestroyDescriptorPool(dev, impl_->descriptor_pool, nullptr);
     }
 
     // Command pool (frees command buffers implicitly)

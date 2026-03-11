@@ -1,0 +1,100 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  enemy_pack_hunter.actions.xml
+  Serial action sequences for the enemy_pack_hunter archetype.
+
+  The Nadir shader (enemy_pack_hunter.nadir) triggers these by writing
+  a non-zero action_request into the BehaviorOutput buffer.  The CPU-side
+  ActionSystem reads that field each frame and executes the matching sequence.
+
+  Sequence IDs:
+    1 = patrol_route_a   (loop)
+    2 = death_sequence
+    3 = taunt
+    4 = regroup          (called when heavily outnumbered)
+-->
+<actions archetype="enemy_pack_hunter" version="1">
+
+  <!-- ─────────────────────────────────────────────────────────────────────
+       Sequence 1: patrol_route_a
+       Triangular patrol path between three waypoints.  Loops indefinitely.
+       The Nadir shader requests this (id=1) when in STATE_PATROL and no
+       sequence is already running.
+  ──────────────────────────────────────────────────────────────────────── -->
+  <sequence name="patrol_route_a" id="1" loop="true">
+    <!-- Leg 1: move to first waypoint -->
+    <move_to position="10 0 5" />
+    <!-- Pause and look around at waypoint 1 -->
+    <wait duration="1.5" />
+    <play_anim id="6" duration="1.5" />   <!-- idle_look_around -->
+
+    <!-- Leg 2: move to second waypoint -->
+    <move_to position="20 0 15" />
+    <wait duration="1.0" />
+
+    <!-- Leg 3: move to third waypoint -->
+    <move_to position="5 0 20" />
+    <!-- Longer rest at the far waypoint -->
+    <wait duration="2.5" />
+    <play_anim id="6" duration="1.0" />   <!-- idle_look_around -->
+  </sequence>
+
+  <!-- ─────────────────────────────────────────────────────────────────────
+       Sequence 2: death_sequence
+       Plays the death animation, emits a sound, waits for the ragdoll to
+       settle, then spawns a loot drop and removes the entity.
+       Triggered when health drops to zero (shader sets action_request = 2).
+  ──────────────────────────────────────────────────────────────────────── -->
+  <sequence name="death_sequence" id="2">
+    <!-- Play death fall animation -->
+    <play_anim id="10" duration="0.6" />  <!-- death_fall_back -->
+    <!-- Voice line / death cry -->
+    <play_sound name="enemy_death_cry" />
+    <!-- Wait for ragdoll to settle -->
+    <wait duration="2.0" />
+    <!-- Spawn loot at entity feet (+0.5 Y so it doesn't clip into ground) -->
+    <spawn prefab="loot_drop" offset="0 0.5 0" />
+    <!-- Remove the entity -->
+    <destroy_self />
+  </sequence>
+
+  <!-- ─────────────────────────────────────────────────────────────────────
+       Sequence 3: taunt
+       Face the player, play a taunt animation, and record in persist state
+       that the taunt was performed (prevents repeat taunts too soon).
+       The Nadir shader requests this (id=3) when entering STATE_ALERT with
+       a long cooldown guard on the comms channel.
+  ──────────────────────────────────────────────────────────────────────── -->
+  <sequence name="taunt" id="3">
+    <!-- Face the player before taunting -->
+    <look_at target="player" />
+    <!-- Taunt animation -->
+    <play_anim id="5" duration="2.0" />   <!-- taunt_gesture -->
+    <!-- Bark taunt voice line -->
+    <play_sound name="enemy_taunt_01" />
+    <!-- Set memory_0.x = 1.0 so the shader knows taunt was performed -->
+    <set_state key="0" value="1.0" />
+    <!-- Broadcast aggression signal to nearby allies -->
+    <emit_signal value="0.8" />
+  </sequence>
+
+  <!-- ─────────────────────────────────────────────────────────────────────
+       Sequence 4: regroup
+       Called when the pack is heavily outnumbered.  The hunter moves to a
+       rally point, signals allies, and then waits for them to arrive.
+  ──────────────────────────────────────────────────────────────────────── -->
+  <sequence name="regroup" id="4">
+    <!-- Strong urgency signal to draw allies -->
+    <emit_signal value="1.0" />
+    <!-- Move to central rally point -->
+    <move_to position="12 0 12" />
+    <!-- Call for backup -->
+    <play_sound name="enemy_call_rally" />
+    <play_anim id="7" duration="1.0" />   <!-- wave_over gesture -->
+    <!-- Wait briefly for allies to converge -->
+    <wait duration="3.0" />
+    <!-- Clear the regroup flag so the shader stops re-triggering this -->
+    <set_state key="1" value="0.0" />
+  </sequence>
+
+</actions>

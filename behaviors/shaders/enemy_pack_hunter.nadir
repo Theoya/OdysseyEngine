@@ -61,7 +61,7 @@ void main() {
 
     // State transition
     uint new_state = state;
-    float max_score = max4(combat_score, flee_score, patrol_score, alert_score);
+    float max_score = score_max4(combat_score, flee_score, patrol_score, alert_score);
     if (max_score > 0.3) {
         if (combat_score == max_score) new_state = STATE_COMBAT;
         else if (flee_score == max_score) new_state = STATE_FLEE;

@@ -1,6 +1,9 @@
 // blackboard.glsl — Per-agent persistent memory read/write helpers
 // Uses AgentPersistGPU.memory_0 and memory_1 (vec4 each = 8 floats of storage)
 
+#ifndef BLACKBOARD_GLSL
+#define BLACKBOARD_GLSL
+
 // Read float from memory slot (0-7)
 float bb_read_float(uint idx, uint slot) {
     if (slot < 4u) {
@@ -93,3 +96,5 @@ float bb_read_counter(uint idx) {
 void bb_reset_counter(uint idx) {
     bb_write_float(idx, 7u, 0.0);
 }
+
+#endif // BLACKBOARD_GLSL

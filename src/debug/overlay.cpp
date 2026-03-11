@@ -3,11 +3,11 @@
 #include <spdlog/spdlog.h>
 
 // ImGui integration is optional — allow compilation without ImGui headers
-#if __has_include(<imgui.h>)
+#if __has_include(<imgui.h>) && __has_include(<backends/imgui_impl_glfw.h>)
 #define ODYSSEY_HAS_IMGUI 1
 #include <imgui.h>
-#include <imgui_impl_glfw.h>
-#include <imgui_impl_vulkan.h>
+#include <backends/imgui_impl_glfw.h>
+#include <backends/imgui_impl_vulkan.h>
 #include <GLFW/glfw3.h>
 #else
 #define ODYSSEY_HAS_IMGUI 0

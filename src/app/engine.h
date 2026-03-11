@@ -2,6 +2,7 @@
 
 #include "core/types.h"
 #include "core/result.h"
+#include "app/game.h"
 
 #include <cstdint>
 #include <filesystem>
@@ -27,6 +28,12 @@ struct EngineConfig {
     std::filesystem::path lib_dir      = "behaviors/lib";
     bool hot_reload   = true;
     uint32_t max_agents = 100000;
+
+    // Scene
+    std::filesystem::path scene_path = "demo/scenes/shooter_arena.scene.xml";
+
+    // Shaders
+    std::filesystem::path shader_dir = "shaders";
 };
 
 /// Pure function: parse an engine.xml config file into EngineConfig.
@@ -48,7 +55,10 @@ public:
     Engine& operator=(Engine&&) = delete;
 
     /// Initialize all subsystems (window, Vulkan, Nadir).
-    Result<bool> initialize(const EngineConfig& config);
+    /// If a Game is provided, the engine will call its lifecycle methods.
+    /// If null, engine runs as a renderer-only (no gameplay).
+    Result<bool> initialize(const EngineConfig& config,
+                            std::unique_ptr<Game> game = nullptr);
 
     /// Enter the main loop — blocks until the window is closed.
     void run();
@@ -62,6 +72,7 @@ public:
 private:
     // Per-frame work
     void process_frame(float delta_time);
+    void render_entities(const mat4& vp);
 
     // Subsystem init helpers
     Result<bool> init_window(const EngineConfig& config);

@@ -1,5 +1,8 @@
 // state_machine.glsl — Lightweight state machine helpers for behavior shaders
 
+#ifndef STATE_MACHINE_GLSL
+#define STATE_MACHINE_GLSL
+
 // State constants (common states)
 const uint STATE_IDLE    = 0u;
 const uint STATE_PATROL  = 1u;
@@ -74,3 +77,5 @@ float state_urgency(float state_timer, float ramp_duration) {
 float hysteresis_bonus(uint current_state, uint candidate_state, float bonus) {
     return (current_state == candidate_state) ? bonus : 0.0;
 }
+
+#endif // STATE_MACHINE_GLSL

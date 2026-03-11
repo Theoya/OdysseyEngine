@@ -37,7 +37,7 @@ void main() {
     float flee_s = score_damage(hp, max_hp) * too_close + hysteresis_bonus(state, STATE_FLEE, 0.15);
 
     uint new_state = state;
-    float best = max3(combat_s, reposition_s, flee_s);
+    float best = score_max3(combat_s, reposition_s, flee_s);
     if (best > 0.25) {
         if (combat_s >= best) new_state = STATE_COMBAT;
         else if (reposition_s >= best) new_state = STATE_ALERT; // reposition

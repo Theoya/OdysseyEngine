@@ -97,16 +97,27 @@ Result<VkInstance> create_instance(const InstanceConfig& config) {
     create_info.enabledExtensionCount   = static_cast<uint32_t>(config.required_extensions.size());
     create_info.ppEnabledExtensionNames = config.required_extensions.data();
 
-    // Validation layers
+    // Validation layers — gracefully skip if not available
     VkDebugUtilsMessengerCreateInfoEXT debug_ci{};
-    if (config.enable_validation && !config.required_layers.empty()) {
-        if (!check_layer_support(config.required_layers)) {
-            return Result<VkInstance>::err("Requested validation layers are not available");
-        }
+    bool use_validation = config.enable_validation
+                          && !config.required_layers.empty()
+                          && check_layer_support(config.required_layers);
+
+    if (config.enable_validation && !use_validation) {
+        spdlog::warn("Validation layers not available (install Vulkan SDK). Continuing without them.");
+        // Remove the debug utils extension we added since we're not using layers
+        auto& exts = const_cast<std::vector<const char*>&>(config.required_extensions);
+        std::erase_if(exts, [](const char* e) {
+            return std::strcmp(e, VK_EXT_DEBUG_UTILS_EXTENSION_NAME) == 0;
+        });
+        create_info.enabledExtensionCount = static_cast<uint32_t>(exts.size());
+        create_info.ppEnabledExtensionNames = exts.data();
+    }
+
+    if (use_validation) {
         create_info.enabledLayerCount   = static_cast<uint32_t>(config.required_layers.size());
         create_info.ppEnabledLayerNames = config.required_layers.data();
 
-        // Attach a debug messenger to instance creation/destruction as well.
         debug_ci.sType           = VK_STRUCTURE_TYPE_DEBUG_UTILS_MESSENGER_CREATE_INFO_EXT;
         debug_ci.messageSeverity = VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT
                                  | VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT;

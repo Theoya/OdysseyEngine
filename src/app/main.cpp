@@ -1,5 +1,6 @@
 #include "cli/cli.h"
 #include "app/engine.h"
+#include "app/game.h"
 
 #include <spdlog/spdlog.h>
 
@@ -35,9 +36,12 @@ int main(int argc, char* argv[]) {
         spdlog::info("Scene override from CLI: {}", cli_result.scene_path);
     }
 
-    // Boot the engine.
+    // Create the game (factory function defined by the game, not the engine).
+    auto game = odyssey::create_game();
+
+    // Boot the engine with the game.
     odyssey::Engine engine;
-    auto init_result = engine.initialize(config);
+    auto init_result = engine.initialize(config, std::move(game));
     if (init_result.is_err()) {
         spdlog::error("Engine initialization failed: {}", init_result.error());
         return 1;

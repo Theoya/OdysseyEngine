@@ -124,7 +124,7 @@ Result<bool> BehaviorReplay::save_recording(const BehaviorRecording& recording,
     }
 
     spdlog::info("BehaviorReplay: saved recording to {} ({} bytes)",
-                 path.string(), file.tellp());
+                 path.string(), static_cast<int64_t>(file.tellp()));
     return Result<bool>::ok(true);
 }
 

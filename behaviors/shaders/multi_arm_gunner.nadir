@@ -74,7 +74,7 @@ void main() {
     // comms_signal = shield activation
     // Use debug buffer for full per-arm data
 
-    float best_weapon = max3(shotgun_score, sniper_score, smg_score);
+    float best_weapon = score_max3(shotgun_score, sniper_score, smg_score);
 
     // Update cooldowns on fire
     if (shotgun_score > 0.6 && shotgun_score >= best_weapon) cd0 = cooldown_start(1.2);
@@ -87,7 +87,7 @@ void main() {
     float cover_mod = incoming_damage_norm * (1.0 - health_norm) * 0.8 + hysteresis_bonus(state, STATE_COVER, 0.1);
 
     uint new_state = state;
-    float max_mod = max3(combat_mod, flee_mod, cover_mod);
+    float max_mod = score_max3(combat_mod, flee_mod, cover_mod);
     if (max_mod > 0.25) {
         if (combat_mod >= max_mod) new_state = STATE_COMBAT;
         else if (flee_mod >= max_mod) new_state = STATE_FLEE;

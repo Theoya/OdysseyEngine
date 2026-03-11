@@ -62,115 +62,88 @@ JsonRpcResponse ok_response(const std::string& json_result) {
 // register_engine_tools — wire up all tools with the server
 // ---------------------------------------------------------------------------
 
+static ToolDefinition make_tool(
+    std::string name, std::string desc, std::string schema,
+    std::function<JsonRpcResponse(const JsonRpcRequest&)> handler)
+{
+    ToolDefinition td;
+    td.name = std::move(name);
+    td.description = std::move(desc);
+    td.input_schema = std::move(schema);
+    td.handler = std::move(handler);
+    return td;
+}
+
 void register_engine_tools(MCPServer& server, ToolContext& ctx) {
-    // ----- scene.get_entities -----
-    server.register_tool({
+    server.register_tool(make_tool(
         "scene.get_entities",
         "List all entities in the scene with their ID, name, archetype, and position.",
         R"({"type":"object","properties":{}})",
-        [&ctx](const JsonRpcRequest& req) {
-            return tools::scene_get_entities(req, ctx);
-        }
-    });
+        [&ctx](const JsonRpcRequest& req) { return tools::scene_get_entities(req, ctx); }
+    ));
 
-    // ----- entity.inspect -----
-    server.register_tool({
+    server.register_tool(make_tool(
         "entity.inspect",
         "Return full component data for a single entity by ID or name.",
-        R"({"type":"object","properties":{)"
-        R"("id":{"type":"integer","description":"Entity ID"},"name":{"type":"string","description":"Entity name (alternative to id)"}}})",
-        [&ctx](const JsonRpcRequest& req) {
-            return tools::entity_inspect(req, ctx);
-        }
-    });
+        R"({"type":"object","properties":{"id":{"type":"integer"},"name":{"type":"string"}}})",
+        [&ctx](const JsonRpcRequest& req) { return tools::entity_inspect(req, ctx); }
+    ));
 
-    // ----- entity.modify -----
-    server.register_tool({
+    server.register_tool(make_tool(
         "entity.modify",
-        "Modify an entity's components (position, rotation, scale, health, speed, etc.).",
-        R"({"type":"object","properties":{)"
-        R"("id":{"type":"integer","description":"Entity ID"},)"
-        R"("position":{"type":"object","properties":{"x":{"type":"number"},"y":{"type":"number"},"z":{"type":"number"}}},)"
-        R"("health":{"type":"number","description":"Set entity health"},)"
-        R"("speed":{"type":"number","description":"Set entity speed"}},"required":["id"]})",
-        [&ctx](const JsonRpcRequest& req) {
-            return tools::entity_modify(req, ctx);
-        }
-    });
+        "Modify an entity's components.",
+        R"({"type":"object","properties":{"id":{"type":"integer"},"position":{"type":"object"},"health":{"type":"number"}},"required":["id"]})",
+        [&ctx](const JsonRpcRequest& req) { return tools::entity_modify(req, ctx); }
+    ));
 
-    // ----- entity.spawn -----
-    server.register_tool({
+    server.register_tool(make_tool(
         "entity.spawn",
         "Create a new entity from an archetype at a given position.",
-        R"({"type":"object","properties":{)"
-        R"("name":{"type":"string","description":"Entity name"},)"
-        R"("archetype":{"type":"string","description":"Archetype name"},)"
-        R"("position":{"type":"object","properties":{"x":{"type":"number"},"y":{"type":"number"},"z":{"type":"number"}}}})"
-        R"(,"required":["name","archetype"]})",
-        [&ctx](const JsonRpcRequest& req) {
-            return tools::entity_spawn(req, ctx);
-        }
-    });
+        R"({"type":"object","properties":{"name":{"type":"string"},"archetype":{"type":"string"},"position":{"type":"object"}},"required":["name","archetype"]})",
+        [&ctx](const JsonRpcRequest& req) { return tools::entity_spawn(req, ctx); }
+    ));
 
-    // ----- entity.destroy -----
-    server.register_tool({
+    server.register_tool(make_tool(
         "entity.destroy",
         "Destroy an entity by ID.",
-        R"({"type":"object","properties":{"id":{"type":"integer","description":"Entity ID to destroy"}},"required":["id"]})",
-        [&ctx](const JsonRpcRequest& req) {
-            return tools::entity_destroy(req, ctx);
-        }
-    });
+        R"({"type":"object","properties":{"id":{"type":"integer"}},"required":["id"]})",
+        [&ctx](const JsonRpcRequest& req) { return tools::entity_destroy(req, ctx); }
+    ));
 
-    // ----- nadir.compile -----
-    server.register_tool({
+    server.register_tool(make_tool(
         "nadir.compile",
-        "Compile a .nadir behavior shader file and report success or errors.",
-        R"({"type":"object","properties":{"path":{"type":"string","description":"Path to .nadir file"}},"required":["path"]})",
-        [&ctx](const JsonRpcRequest& req) {
-            return tools::nadir_compile(req, ctx);
-        }
-    });
+        "Compile a .nadir behavior shader file.",
+        R"({"type":"object","properties":{"path":{"type":"string"}},"required":["path"]})",
+        [&ctx](const JsonRpcRequest& req) { return tools::nadir_compile(req, ctx); }
+    ));
 
-    // ----- nadir.hot_reload -----
-    server.register_tool({
+    server.register_tool(make_tool(
         "nadir.hot_reload",
-        "Trigger a hot-reload check for all behavior shaders, recompiling any that changed.",
+        "Trigger a hot-reload check for all behavior shaders.",
         R"({"type":"object","properties":{}})",
-        [&ctx](const JsonRpcRequest& req) {
-            return tools::nadir_hot_reload(req, ctx);
-        }
-    });
+        [&ctx](const JsonRpcRequest& req) { return tools::nadir_hot_reload(req, ctx); }
+    ));
 
-    // ----- nadir.list -----
-    server.register_tool({
+    server.register_tool(make_tool(
         "nadir.list",
-        "List all registered behavior shader archetypes with entity counts.",
+        "List all registered behavior shader archetypes.",
         R"({"type":"object","properties":{}})",
-        [&ctx](const JsonRpcRequest& req) {
-            return tools::nadir_list(req, ctx);
-        }
-    });
+        [&ctx](const JsonRpcRequest& req) { return tools::nadir_list(req, ctx); }
+    ));
 
-    // ----- engine.status -----
-    server.register_tool({
+    server.register_tool(make_tool(
         "engine.status",
-        "Return current engine state: running, entity count, archetype count, uptime.",
+        "Return current engine state.",
         R"({"type":"object","properties":{}})",
-        [&ctx](const JsonRpcRequest& req) {
-            return tools::engine_status(req, ctx);
-        }
-    });
+        [&ctx](const JsonRpcRequest& req) { return tools::engine_status(req, ctx); }
+    ));
 
-    // ----- frame.profile -----
-    server.register_tool({
+    server.register_tool(make_tool(
         "frame.profile",
         "Return timing data for the last rendered frame.",
         R"({"type":"object","properties":{}})",
-        [&ctx](const JsonRpcRequest& req) {
-            return tools::frame_profile(req, ctx);
-        }
-    });
+        [&ctx](const JsonRpcRequest& req) { return tools::frame_profile(req, ctx); }
+    ));
 
     spdlog::info("MCP: registered {} engine tools", 10);
 }
@@ -203,14 +176,13 @@ JsonRpcResponse scene_get_entities(const JsonRpcRequest& /*req*/, ToolContext& c
             .key("name").value(entity.name)
             .key("archetype").value(entity.archetype);
 
-        // Include position if transform component exists
-        if (entity.components.count("transform")) {
-            // Position is stored in the entity's components map.
-            // Exact access depends on EntityComponents definition.
+        // Include position from transform component
+        {
+            const auto& t = entity.components.transform;
             b.key("position").begin_object()
-                .key("x").value(0.0)
-                .key("y").value(0.0)
-                .key("z").value(0.0)
+                .key("x").value(static_cast<double>(t.position.x))
+                .key("y").value(static_cast<double>(t.position.y))
+                .key("z").value(static_cast<double>(t.position.z))
             .end_object();
         }
 

@@ -1,5 +1,8 @@
 // debug.glsl — Debug output helpers for behavior visualization
 
+#ifndef DEBUG_GLSL
+#define DEBUG_GLSL
+
 // Write a color to debug buffer for visualization
 void debug_color(uint idx, vec3 color) {
     debug_data[idx] = vec4(color, 1.0);
@@ -36,3 +39,5 @@ void debug_direction(uint idx, vec3 dir) {
 void debug_pack4(uint idx, float a, float b, float c, float d) {
     debug_data[idx] = vec4(a, b, c, d);
 }
+
+#endif // DEBUG_GLSL

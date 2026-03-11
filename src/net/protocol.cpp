@@ -42,7 +42,7 @@ void PacketWriter::write_quat(quat q) {
 }
 
 void PacketWriter::write_string(const char* str, size_t max_len) {
-    size_t len = std::min(std::strlen(str), max_len);
+    size_t len = std::min(std::strlen(str), max_len - 1); // reserve 1 byte for null
     size_t old_size = buffer_.size();
     buffer_.resize(old_size + max_len, 0);
     std::memcpy(buffer_.data() + old_size, str, len);

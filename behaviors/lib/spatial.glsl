@@ -1,6 +1,9 @@
 // spatial.glsl — Spatial query helpers
 // Provides distance queries, direction helpers, line-of-sight checks
 
+#ifndef SPATIAL_GLSL
+#define SPATIAL_GLSL
+
 // Distance squared (avoid sqrt for comparisons)
 float distance_sq(vec3 a, vec3 b) { vec3 d = b - a; return dot(d, d); }
 
@@ -61,3 +64,5 @@ uint spatial_hash(ivec3 cell, uint grid_size) {
 ivec3 world_to_cell(vec3 pos, float cell_size) {
     return ivec3(floor(pos / cell_size));
 }
+
+#endif // SPATIAL_GLSL

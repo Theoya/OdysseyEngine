@@ -127,8 +127,9 @@ std::string generate_shader_preamble(uint32_t workgroup_size) {
     s << "    float sound_priority;\n";
     s << "    float comms_signal;\n";
     s << "    float comms_urgency;\n";
-    s << "    float _pad0;\n";
-    s << "    float _pad1;\n";
+    s << "    uint action_request;   // sequence ID to start (0 = none)\n";
+    s << "    float action_priority; // priority of the request\n";
+    s << "    // total: 64 bytes\n";
     s << "};\n";
     s << "\n";
 

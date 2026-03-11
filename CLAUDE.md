@@ -2,23 +2,23 @@
 
 ## Build
 ```bash
-# Configure (vcpkg must be installed, VCPKG_ROOT set)
-cmake -B build -S . -DCMAKE_TOOLCHAIN_FILE=$VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake
+# CRITICAL: must set VCToolsVersion to match vcpkg binary ABI
+export VCToolsVersion=14.42.34433
+
+# Configure
+cmake -B build -S . -DCMAKE_TOOLCHAIN_FILE=T:/vcpkg/scripts/buildsystems/vcpkg.cmake
 
 # Build
-cmake --build build --config Release
+VCToolsVersion=14.42.34433 cmake --build build --config Release
 
 # Run
-./build/Release/odyssey run --scene demo/scenes/shooter_arena.scene.xml
+cd build && ./Release/odyssey.exe run
 ```
 
 ## Test
 ```bash
-# Unit tests (no GPU required)
-ctest --test-dir build -R unit
-
-# Pipeline tests (requires GPU)
-ctest --test-dir build -R pipeline
+cd build && ./Release/odyssey_tests_unit.exe    # 118 unit tests
+cd build && ./Release/odyssey_tests_pipeline.exe # pipeline tests (requires GPU)
 ```
 
 ## Architecture

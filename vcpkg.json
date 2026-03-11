@@ -2,12 +2,17 @@
   "name": "odyssey-engine",
   "version": "0.1.0",
   "dependencies": [
+    "vulkan-headers",
+    "vulkan-loader",
     "glfw3",
     "vulkan-memory-allocator",
     "glm",
     "stb",
     "tinyobjloader",
-    "imgui",
+    {
+      "name": "imgui",
+      "features": ["glfw-binding", "vulkan-binding"]
+    },
     "spdlog",
     "shaderc",
     "pugixml",

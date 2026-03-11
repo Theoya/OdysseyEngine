@@ -1,0 +1,138 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  multi_arm_gunner.actions.xml
+  Serial action sequences for the multi_arm_gunner archetype.
+
+  The Nadir shader (multi_arm_gunner.nadir) writes action_request into the
+  BehaviorOutput buffer; the CPU ActionSystem executes the matching sequence.
+
+  The gunner has four independent weapon arms evaluated simultaneously on the
+  GPU, but some scripted moments (death, power-up entry, special attack) must
+  be serial — that is what these sequences provide.
+
+  Sequence IDs:
+    1 = patrol_sweep     (loop) — slow patrol with weapon raises
+    2 = death_sequence          — multi-phase death with explosion
+    3 = enter_combat            — dramatic combat stance entry
+    4 = overload_attack         — brief sequential arm-fire special move
+    5 = taunt_with_shield       — raise shield + voice line
+-->
+<actions archetype="multi_arm_gunner" version="1">
+
+  <!-- ─────────────────────────────────────────────────────────────────────
+       Sequence 1: patrol_sweep
+       The gunner performs a slow sweep of its patrol area, occasionally
+       raising its arms in a threat display.  Loops while in STATE_PATROL.
+  ──────────────────────────────────────────────────────────────────────── -->
+  <sequence name="patrol_sweep" id="1" loop="true">
+    <!-- Move to the near edge of the patrol box -->
+    <move_to position="-15 0 0" />
+    <!-- Brief pause, sensor sweep animation -->
+    <wait duration="1.0" />
+    <play_anim id="2" duration="2.0" />  <!-- sensor_sweep -->
+
+    <!-- Cross the patrol zone -->
+    <move_to position="15 0 0" />
+    <wait duration="1.0" />
+    <play_anim id="2" duration="1.5" />  <!-- sensor_sweep -->
+
+    <!-- Return to origin, slower pace -->
+    <move_to position="0 0 0" />
+    <wait duration="2.0" />
+    <!-- Raise all arms briefly as threat display -->
+    <play_anim id="3" duration="1.5" />  <!-- arms_raise_all -->
+  </sequence>
+
+  <!-- ─────────────────────────────────────────────────────────────────────
+       Sequence 2: death_sequence
+       Multi-phase destruction: partial explosion, stagger, shield failure,
+       final collapse, then loot + VFX spawns.
+  ──────────────────────────────────────────────────────────────────────── -->
+  <sequence name="death_sequence" id="2">
+    <!-- Arms begin failing — sparks + stumble anim -->
+    <play_anim id="20" duration="0.4" />   <!-- arm_failure_spark -->
+    <play_sound name="gunner_arm_explode" />
+    <!-- Brief stagger -->
+    <play_anim id="21" duration="0.8" />   <!-- stagger_heavy -->
+    <!-- Shield collapse burst -->
+    <play_sound name="gunner_shield_fail" />
+    <emit_signal value="1.0" />            <!-- maximum distress signal -->
+    <!-- Main death fall -->
+    <play_anim id="22" duration="1.0" />   <!-- death_collapse_forward -->
+    <play_sound name="gunner_death_boom" />
+    <!-- Wait for debris to settle -->
+    <wait duration="1.5" />
+    <!-- Spawn salvage items at various offsets -->
+    <spawn prefab="loot_energy_cell"   offset="0.5  0.3  0.2"  />
+    <spawn prefab="loot_armor_shard"   offset="-0.4 0.2  0.3"  />
+    <spawn prefab="vfx_smoke_heavy"    offset="0    0.5  0"     />
+    <!-- Mark as dead in persist state (memory_0.x = 99.0 sentinel) -->
+    <set_state key="0" value="99.0" />
+    <destroy_self />
+  </sequence>
+
+  <!-- ─────────────────────────────────────────────────────────────────────
+       Sequence 3: enter_combat
+       One-shot cinematic when the gunner spots the player and transitions
+       from patrol/alert into combat mode.
+  ──────────────────────────────────────────────────────────────────────── -->
+  <sequence name="enter_combat" id="3">
+    <!-- Stop and face the player -->
+    <look_at target="player" />
+    <!-- Weapons charge-up animation -->
+    <play_anim id="8" duration="1.2" />   <!-- arms_power_up -->
+    <play_sound name="gunner_target_acquired" />
+    <!-- Short pause for dramatic effect -->
+    <wait duration="0.3" />
+    <!-- Record that combat intro was played (prevents re-triggering) -->
+    <set_state key="1" value="1.0" />
+  </sequence>
+
+  <!-- ─────────────────────────────────────────────────────────────────────
+       Sequence 4: overload_attack
+       A special move: briefly locks movement, fires all four arms in
+       sequence, then cooldown pause.  Requested when all four weapon scores
+       are simultaneously high (a unique Nadir multi-arm scoring condition).
+  ──────────────────────────────────────────────────────────────────────── -->
+  <sequence name="overload_attack" id="4">
+    <!-- Plant feet — face player then lock briefly -->
+    <look_at target="player" />
+    <!-- Wind-up animation -->
+    <play_anim id="12" duration="0.6" />   <!-- overload_windup -->
+    <play_sound name="gunner_overload_charge" />
+    <!-- Sequential arm discharges (each arm fires, then next) -->
+    <play_anim id="13" duration="0.3" />   <!-- arm0_fire -->
+    <play_anim id="14" duration="0.3" />   <!-- arm1_fire -->
+    <play_anim id="15" duration="0.3" />   <!-- arm2_fire -->
+    <play_anim id="16" duration="0.3" />   <!-- arm3_fire -->
+    <!-- Final blast sound -->
+    <play_sound name="gunner_overload_release" />
+    <!-- Cool-down shudder -->
+    <play_anim id="17" duration="1.0" />   <!-- overload_cooldown_shudder -->
+    <!-- Wait while systems reset -->
+    <wait duration="1.5" />
+    <!-- Clear the overload trigger flag -->
+    <set_state key="2" value="0.0" />
+  </sequence>
+
+  <!-- ─────────────────────────────────────────────────────────────────────
+       Sequence 5: taunt_with_shield
+       Raise the shield arm, face the player, deliver a voice taunt, then
+       retract.  Used when the gunner is in STATE_COVER with high shield score.
+  ──────────────────────────────────────────────────────────────────────── -->
+  <sequence name="taunt_with_shield" id="5">
+    <look_at target="player" />
+    <!-- Raise shield arm prominently -->
+    <play_anim id="9" duration="0.5" />    <!-- shield_raise -->
+    <play_sound name="gunner_taunt_01" />
+    <!-- Hold taunting pose -->
+    <wait duration="1.8" />
+    <!-- Second voice line variant -->
+    <play_sound name="gunner_taunt_02" />
+    <!-- Retract shield and mark taunt done so shader backs off -->
+    <play_anim id="10" duration="0.4" />   <!-- shield_lower -->
+    <set_state key="3" value="1.0" />      <!-- memory_0.w = taunt_done -->
+    <emit_signal value="0.6" />            <!-- mild comms signal to allies -->
+  </sequence>
+
+</actions>

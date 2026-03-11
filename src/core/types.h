@@ -41,15 +41,17 @@ struct EntityStats {
 
 // Behavior output (per-entity, written by compute shader)
 struct BehaviorOutput {
-    vec4 move_vector;    // xyz = direction, w = weight
-    vec4 attack_target;  // xyz = target pos, w = weight
+    vec4 move_vector;       // xyz = direction, w = weight
+    vec4 attack_target;     // xyz = target pos, w = weight
     uint32_t animation_id;
     float animation_blend;
     uint32_t sound_event;
     float sound_priority;
     float comms_signal;
     float comms_urgency;
-    float padding[2];    // align to 64 bytes
+    uint32_t action_request;  // sequence ID to start (0 = none)
+    float    action_priority; // priority of the request
+    // total: 64 bytes (16+16+4+4+4+4+4+4+4+4 = 64)
 };
 
 // World state (uniform, shared across all archetypes)

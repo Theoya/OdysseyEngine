@@ -1,5 +1,7 @@
 // scoring.glsl — Utility curves and normalization for behavior scoring
 // Include via: #include "scoring.glsl"
+#ifndef SCORING_GLSL
+#define SCORING_GLSL
 
 // Normalize value to 0..1 range
 float normalize01(float value, float min_val, float max_val) {
@@ -48,11 +50,11 @@ float blend_scores(float a, float b, float t) {
 }
 
 // Max of multiple scores (pick strongest behavior)
-float max3(float a, float b, float c) {
+float score_max3(float a, float b, float c) {
     return max(a, max(b, c));
 }
 
-float max4(float a, float b, float c, float d) {
+float score_max4(float a, float b, float c, float d) {
     return max(max(a, b), max(c, d));
 }
 
@@ -66,3 +68,5 @@ float biased_score(float score, float max_score, float temperature) {
 float cooldown_ready(float cooldown_timer, float cooldown_duration) {
     return step(cooldown_duration, cooldown_timer);
 }
+
+#endif // SCORING_GLSL
