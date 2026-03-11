@@ -107,6 +107,38 @@ target_link_libraries(odyssey_shooter
     odyssey_engine
 )
 
+# ── Editor Demo (using OpenGL for ImGui showcase) ─────────────────────────────
+# Note: The full editor uses Vulkan, this is a simplified OpenGL demo
+find_package(OpenGL REQUIRED)
+
+file(GLOB_RECURSE EDITOR_SOURCES CONFIGURE_DEPENDS
+  "demo/editor/*.cpp" "demo/editor/*.h"
+)
+
+add_executable(odyssey_editor ${EDITOR_SOURCES})
+
+target_include_directories(odyssey_editor
+  PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/demo
+)
+
+target_link_libraries(odyssey_editor
+  PRIVATE
+    odyssey_engine
+    glfw
+    OpenGL::GL
+)
+
+# Copy editor assets
+add_custom_target(copy_editor_assets ALL
+  COMMAND ${CMAKE_COMMAND} -E copy_directory
+    "${CMAKE_CURRENT_SOURCE_DIR}/demo/editor"
+    "${CMAKE_CURRENT_BINARY_DIR}/demo/editor"
+  COMMENT "Copying editor assets to build directory"
+)
+
+add_dependencies(odyssey_editor copy_engine_assets copy_editor_assets)
+
 # ── FPS humanoid demo (game executable) ────────────────────────────────────
 file(GLOB_RECURSE FPS_SOURCES CONFIGURE_DEPENDS
   "demo/fps_humanoid/*.cpp" "demo/fps_humanoid/*.h"
