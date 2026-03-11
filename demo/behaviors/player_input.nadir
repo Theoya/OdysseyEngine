@@ -49,6 +49,8 @@ void main() {
     outputs[idx].sound_priority = shoot;
     outputs[idx].comms_signal = 0.0;
     outputs[idx].comms_urgency = 0.0;
+    outputs[idx].action_request = 0u;
+    outputs[idx].action_priority = 0.0;
 
     debug_data[idx] = vec4(move_dir * 0.5 + 0.5, move_weight);
 }

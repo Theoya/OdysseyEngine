@@ -4,6 +4,7 @@
 #include "core/result.h"
 #include "nadir/behavior_compiler.h"
 #include "nadir/nadir_buffers.h"
+#include "vulkan/device.h"
 
 #include <vulkan/vulkan.h>
 #include <vk_mem_alloc.h>
@@ -91,6 +92,32 @@ public:
     // Record all behavior dispatches into a command buffer
     void record_dispatches(VkCommandBuffer cmd) const;
 
+    // Transfer context — must be set before upload/readback calls
+    void set_transfer_context(const vulkan::DeviceContext& device_ctx,
+                              VkCommandPool transfer_pool);
+
+    // Upload entity positions (vec4 per entity) to an archetype's transform buffer
+    Result<bool> upload_transforms(const std::string& archetype,
+                                   const vec4* data, uint32_t count);
+
+    // Upload entity stats to an archetype's stats buffer
+    Result<bool> upload_stats(const std::string& archetype,
+                              const EntityStats* data, uint32_t count);
+
+    // Upload world state to all archetypes (uses per-archetype entity_count)
+    void upload_world_state_all(float world_time, float delta_time,
+                                const vec3& player_pos, uint32_t frame_number);
+
+    // Upload persist state to an archetype's persist buffer
+    Result<bool> upload_persist(const std::string& archetype,
+                                const void* data, VkDeviceSize size);
+
+    // Readback behavior outputs from an archetype's output buffer
+    Result<std::vector<BehaviorOutput>> readback_outputs(const std::string& archetype);
+
+    // Set the actual entity count for an archetype (may differ from buffer capacity)
+    void set_entity_count(const std::string& name, uint32_t count);
+
     // Accessors
     const Archetype* get_archetype(const std::string& name) const;
     const std::vector<Archetype>& get_archetypes() const { return archetypes_; }
@@ -101,6 +128,10 @@ private:
     VmaAllocator allocator_ = VK_NULL_HANDLE;
     VkDescriptorPool descriptor_pool_ = VK_NULL_HANDLE;
     NadirConfig config_;
+
+    // Transfer context for upload/readback
+    const vulkan::DeviceContext* device_ctx_ = nullptr;
+    VkCommandPool transfer_pool_ = VK_NULL_HANDLE;
 
     std::vector<Archetype> archetypes_;
     std::unordered_map<std::string, size_t> archetype_index_;

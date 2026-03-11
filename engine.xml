@@ -1,13 +1,9 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <engine version="1">
-  <window width="1920" height="1080" title="OdysseyEngine" vsync="true"/>
+  <window width="1920" height="1080" title="OdysseyEngine" vsync="true" fullscreen="false"/>
   <vulkan validation_layers="true" gpu_index="0"/>
-  <nadir>
-    <behavior_dir>behaviors/shaders</behavior_dir>
-    <lib_dir>behaviors/lib</lib_dir>
-    <hot_reload>true</hot_reload>
-    <max_agents>100000</max_agents>
-  </nadir>
+  <nadir behavior_dir="demo/behaviors" lib_dir="behaviors/lib" hot_reload="true" max_agents="100000"/>
+  <scene path="demo/scenes/shooter_arena.scene.xml"/>
   <mcp port="3000" enabled="false"/>
   <cli>
     <output_format>text</output_format>

@@ -47,7 +47,9 @@ static Result<std::pair<VkBuffer, VmaAllocation>> create_single_buffer(
     VmaAllocator allocator,
     VkDeviceSize size,
     VkBufferUsageFlags usage,
-    VmaMemoryUsage memory_usage)
+    VmaMemoryUsage memory_usage,
+    VmaAllocationCreateFlags alloc_flags = 0,
+    void** out_mapped = nullptr)
 {
     if (size == 0) {
         // Return null handles for zero-size buffers (e.g. disabled spatial/debug)
@@ -62,15 +64,21 @@ static Result<std::pair<VkBuffer, VmaAllocation>> create_single_buffer(
 
     VmaAllocationCreateInfo alloc_info{};
     alloc_info.usage = memory_usage;
+    alloc_info.flags = alloc_flags;
 
     VkBuffer buffer = VK_NULL_HANDLE;
     VmaAllocation allocation = VK_NULL_HANDLE;
+    VmaAllocationInfo allocation_info{};
 
     VkResult vk_result = vmaCreateBuffer(allocator, &buffer_info, &alloc_info,
-                                         &buffer, &allocation, nullptr);
+                                         &buffer, &allocation, &allocation_info);
     if (vk_result != VK_SUCCESS) {
         return Result<std::pair<VkBuffer, VmaAllocation>>::err(
             "vmaCreateBuffer failed with VkResult " + std::to_string(vk_result));
+    }
+
+    if (out_mapped && allocation_info.pMappedData) {
+        *out_mapped = allocation_info.pMappedData;
     }
 
     return Result<std::pair<VkBuffer, VmaAllocation>>::ok({buffer, allocation});
@@ -111,14 +119,19 @@ Result<BufferSet> create_buffer_set(VmaAllocator allocator,
     set.spatial = spatial.value().first;
     set.spatial_alloc = spatial.value().second;
 
-    // Buffer 3: World State — uniform buffer, CPU writes via transfer
+    // Buffer 3: World State — uniform buffer, host-mapped for direct memcpy (48 bytes)
+    void* ws_mapped = nullptr;
     auto world_state = create_single_buffer(
         allocator, layout.world_state_size,
         VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT,
-        VMA_MEMORY_USAGE_GPU_ONLY);
+        VMA_MEMORY_USAGE_AUTO,
+        VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT
+            | VMA_ALLOCATION_CREATE_MAPPED_BIT,
+        &ws_mapped);
     if (!world_state.is_ok()) return Result<BufferSet>::err(world_state.error());
     set.world_state = world_state.value().first;
     set.world_state_alloc = world_state.value().second;
+    set.world_state_mapped = ws_mapped;
 
     // Buffer 4: Persistent State — GPU storage, read/write from compute shader
     auto persist = create_single_buffer(

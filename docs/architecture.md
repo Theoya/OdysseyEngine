@@ -8,12 +8,14 @@ This document provides a detailed technical overview of OdysseyEngine's architec
 
 1. [Design Philosophy](#design-philosophy)
 2. [System Architecture](#system-architecture)
-3. [Nadir Deep Dive](#nadir-deep-dive)
-4. [Vulkan Abstraction Layer](#vulkan-abstraction-layer)
-5. [Pure Function Architecture](#pure-function-architecture)
-6. [C++ Scripting System](#c-scripting-system-phase-2)
-7. [Testing Strategy](#testing-strategy)
-8. [Multiplayer Architecture](#multiplayer-architecture-phase-5)
+3. [Engine/Game Separation](#enginegame-separation)
+4. [Rendering Pipeline](#rendering-pipeline)
+5. [Nadir Deep Dive](#nadir-deep-dive)
+6. [Vulkan Abstraction Layer](#vulkan-abstraction-layer)
+7. [Pure Function Architecture](#pure-function-architecture)
+8. [C++ Scripting System](#c-scripting-system-phase-2)
+9. [Testing Strategy](#testing-strategy)
+10. [Multiplayer Architecture](#multiplayer-architecture-phase-5)
 
 ---
 
@@ -58,49 +60,140 @@ The engine is designed to be operated by an LLM (Claude Code) as a first-class u
 ### Layer Diagram
 
 ```
-┌─────────────────────────────────────────────────────────┐
-│                    CLI / Application                     │
-│              (cli.h, engine.h, main.cpp)                │
-├──────────────────────┬──────────────────────────────────┤
-│   Nadir System       │        Scene / Assets            │
-│ (nadir_system.h)     │     (Phase 2: loaders)           │
-│ (behavior_compiler.h)│                                  │
-│ (nadir_buffers.h)    │                                  │
-├──────────────────────┴──────────────────────────────────┤
-│                  Vulkan Abstraction                      │
-│    instance.h  device.h  swapchain.h  buffer.h          │
-│    compute_pipeline.h  command.h                        │
-├─────────────────────────────────────────────────────────┤
-│                    Core Types                            │
-│              types.h  result.h                          │
-└─────────────────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────────────┐
+│                     Game (demo/, template/)                    │
+│          ShooterGame implements Game interface                 │
+│            create_game() factory function                      │
+├──────────────────────────────────────────────────────────────┤
+│                    CLI / Application                           │
+│           (cli.h, engine.h, odyssey_main.cpp)                │
+├──────────────────┬──────────────────┬────────────────────────┤
+│   Nadir System   │  Rendering       │   Scene / Assets       │
+│ (nadir_system.h) │  Renderer        │   (loaders, XML)       │
+│ (compiler)       │  PostProcessor   │                        │
+│ (buffers)        │  Camera, Input   │                        │
+├──────────────────┴──────────────────┴────────────────────────┤
+│                  Vulkan Abstraction                            │
+│   instance  device  swapchain  buffer  command                │
+│   compute_pipeline  renderer  postprocess                    │
+├──────────────────────────────────────────────────────────────┤
+│                    Core Types                                 │
+│              types.h  result.h                               │
+└──────────────────────────────────────────────────────────────┘
 ```
 
 ### Dependency Flow
 
 Dependencies flow strictly downward:
 
-- `app/` depends on `nadir/`, `vulkan/`, `cli/`, `core/`
+- `demo/` depends on `app/` (Game interface only)
+- `app/` depends on `nadir/`, `vulkan/`, `cli/`, `scene/`, `core/`
 - `nadir/` depends on `vulkan/`, `core/`
 - `vulkan/` depends on `core/`
 - `core/` depends on nothing (pure types only)
 
-No circular dependencies are permitted. Each layer exposes a minimal API to the layer above.
+No circular dependencies are permitted. Each layer exposes a minimal API to the layer above. The engine has **zero references** to game code (`demo/`) — the game registers itself via the `create_game()` factory function.
 
 ### Frame Loop
 
 A single frame in OdysseyEngine follows this sequence:
 
-1. **Input** -- Poll GLFW for window events
-2. **CPU Update** -- Run C++ scripts (Phase 2), update world state
-3. **Nadir Dispatch** -- For each archetype:
-   - Update shared SSBOs (world state, transforms, stats)
-   - Bind per-archetype SSBOs (persistent state, output, debug)
-   - Record compute dispatch command
-   - Submit command buffer with appropriate barriers
-4. **Readback** -- Read behavior output SSBOs
-5. **Apply** -- Apply movement, combat, animation from behavior outputs
-6. **Render** -- Submit render commands (swapchain acquire, draw, present)
+1. **Input** -- Poll GLFW for window events, check F11 (fullscreen toggle)
+2. **Fence Wait** -- Wait for previous frame's GPU work to complete
+3. **Game Tick** -- Call `Game::on_tick()` — readback, update logic, physics, AI
+4. **Acquire** -- `vkAcquireNextImageKHR` — if `OUT_OF_DATE`, recreate swapchain and skip frame
+5. **Nadir Dispatch** -- For each archetype, record compute dispatch
+6. **Render** -- Render scene to PostProcessor offscreen target, then CRT+EVA post-process to swapchain
+7. **Present** -- `vkQueuePresentKHR` — if `OUT_OF_DATE`/`SUBOPTIMAL`/resize flag, recreate swapchain
+
+---
+
+## Engine/Game Separation
+
+OdysseyEngine follows a Unity-like model: the engine is a static library (`odyssey_engine`), and games are standalone executables that link against it.
+
+### Game Interface
+
+Games implement the `Game` abstract class:
+
+```cpp
+class Game {
+    virtual Result<bool> on_init(GameContext& ctx) = 0;
+    virtual void on_tick(GameContext& ctx) = 0;
+    virtual const std::vector<RenderEntity>& get_renderables() const = 0;
+    virtual HUDParams get_hud_params() const = 0;
+    virtual void on_shutdown() = 0;
+};
+```
+
+And provide a factory function:
+
+```cpp
+std::unique_ptr<Game> odyssey::create_game();
+```
+
+The engine-provided entry point (`odyssey_main.cpp`) calls `create_game()`, boots the engine, and runs the main loop. Games never touch Vulkan directly.
+
+### Project Structure
+
+```
+OdysseyEngine/
+├── src/                    # Engine source (odyssey_engine library)
+├── behaviors/lib/          # Engine GLSL library (scoring, steering, etc.)
+├── shaders/                # Engine post-process shaders (CRT, EVA HUD)
+├── demo/                   # Shooter game (links against engine)
+│   ├── behaviors/          # Game-specific .nadir behavior shaders
+│   ├── scenes/             # Game scenes (.scene.xml)
+│   └── shooter_game.cpp    # Game implementation
+├── template/               # Template for new games
+│   ├── CMakeLists.txt      # Standalone build (add_subdirectory of engine)
+│   ├── my_game.h/cpp       # Minimal Game implementation
+│   ├── engine.xml          # Game-specific config
+│   └── scenes/             # Game scenes
+└── engine.xml              # Runtime config (behavior_dir, scene path, etc.)
+```
+
+### Configuration
+
+`engine.xml` provides runtime configuration:
+
+```xml
+<engine version="1">
+  <window width="1920" height="1080" title="MyGame" vsync="true" fullscreen="false"/>
+  <nadir behavior_dir="demo/behaviors" lib_dir="behaviors/lib" hot_reload="true"/>
+  <scene path="demo/scenes/shooter_arena.scene.xml"/>
+</engine>
+```
+
+The `scene_path` and `behavior_dir` are game-specific — the engine has no hardcoded paths to game content.
+
+---
+
+## Rendering Pipeline
+
+### Forward Renderer with Post-Processing
+
+The rendering pipeline has two paths:
+
+1. **With PostProcessor** (default): Scene renders to an offscreen target, then CRT + EVA HUD effects are applied as full-screen triangle passes before presenting to the swapchain.
+2. **Direct** (fallback): Scene renders directly to swapchain framebuffers.
+
+### Window Resize and Fullscreen
+
+The engine handles window resize and fullscreen (F11 toggle) via swapchain recreation:
+
+1. **Detection**: `glfwSetFramebufferSizeCallback` sets `framebuffer_resized_` flag; `vkAcquireNextImageKHR` / `vkQueuePresentKHR` return `VK_ERROR_OUT_OF_DATE_KHR`
+2. **Recreation flow**:
+   - `vkDeviceWaitIdle()` — flush all GPU work
+   - Handle minimization (0x0 framebuffer) by waiting for events
+   - Recreate swapchain (pass old handle for driver resource recycling)
+   - `Renderer::recreate_for_resize()` — new depth buffer + framebuffers
+   - `PostProcessor::recreate_for_resize()` — new offscreen target + descriptor update + framebuffers
+3. **Fence safety**: `vkResetFences` is deferred to after successful acquire to prevent deadlock when acquire returns `OUT_OF_DATE`
+
+### Fullscreen Toggle
+
+F11 toggles between windowed and exclusive fullscreen via `glfwSetWindowMonitor()`. The windowed position/size are saved on enter and restored on exit. The toggle sets `framebuffer_resized_` to trigger swapchain recreation.
 
 ---
 
@@ -241,9 +334,10 @@ The Vulkan layer provides thin, RAII-based wrappers around Vulkan objects. Each 
 ### Swapchain (`vulkan/swapchain.h`)
 
 - Creates and manages the swapchain for presentation
-- Handles window resize (swapchain recreation)
-- Pure function: `choose_swap_extent(capabilities, window_size) -> VkExtent2D`
-- I/O boundary: `create_swapchain(device, surface, config) -> VkSwapchainKHR`
+- Handles window resize via `create_swapchain(old_swapchain)` for seamless recreation
+- `destroy_swapchain()` cleans up image views and swapchain handle
+- Pure function: `compute_swapchain_config(device, surface, width, height, vsync) -> SwapchainConfig`
+- I/O boundary: `create_swapchain(device_ctx, surface, config, old_swapchain) -> SwapchainContext`
 
 ### Buffer (`vulkan/buffer.h`)
 
@@ -429,7 +523,7 @@ Shader tests verify that all `.nadir` files in the repository compile successful
 
 ```bash
 odyssey test --shader
-# Compiles every .nadir file in behaviors/shaders/
+# Compiles every .nadir file in demo/behaviors/
 # Reports compilation errors with line numbers
 # Exit code 0 = all pass, 1 = any failure
 ```

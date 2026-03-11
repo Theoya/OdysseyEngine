@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<engine version="1">
+  <window width="1280" height="720" title="My Game" vsync="true" fullscreen="false"/>
+  <vulkan validation_layers="true" gpu_index="0"/>
+  <nadir behavior_dir="behaviors" lib_dir="behaviors/lib" hot_reload="true" max_agents="1000"/>
+  <scene path="scenes/test.scene.xml"/>
+</engine>

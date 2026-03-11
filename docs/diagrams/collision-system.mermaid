@@ -1,0 +1,23 @@
+flowchart TD
+    GP[GroundPlane] --> CS[CollisionSystem]
+    MC[MeshCollider] --> CS
+
+    CS -->|ground_height_at x,z| GH[Ground Height]
+    CS -->|raycast| RH[RayHit]
+
+    GH --> FIK[Foot IK<br/>ground contact]
+    GH --> EC[Entity Clamping]
+
+    RH --> PH[Projectile Hits]
+    RH --> LOS[Line of Sight<br/>AI queries]
+
+    subgraph "MeshCollider Internals"
+        TRI[Triangle List] --> GRID[Spatial Grid]
+        GRID --> MT["Moller-Trumbore<br/>Ray-Triangle Test"]
+    end
+
+    MC -.-> TRI
+
+    style CS fill:#4a9,stroke:#333,color:#fff
+    style GH fill:#9f9,stroke:#333
+    style RH fill:#f99,stroke:#333

@@ -1,8 +1,10 @@
 #pragma once
 
 #include "app/game.h"
+#include "nadir/action_sequence.h"
 
 #include <string>
+#include <unordered_map>
 #include <vector>
 #include <random>
 
@@ -32,7 +34,8 @@ public:
 private:
     // Archetype-to-renderable mapping
     struct ArchetypeMapping {
-        std::string archetype_name;
+        std::string archetype_name;  // scene archetype name
+        std::string nadir_name;      // NadirSystem archetype name (may differ)
         uint32_t start_index;
         uint32_t count;
         vec4 color;
@@ -49,6 +52,7 @@ private:
         float death_timer = 0.f;
         bool alive = true;
         bool is_enemy = false;
+        EntityID entity_id = INVALID_ENTITY;
     };
 
     // CPU-side projectile
@@ -78,8 +82,14 @@ private:
     float damage_flash_ = 0.f;
     float prev_health_ = 150.f;
     float grace_period_ = 3.0f;
+    uint32_t frame_number_ = 0;
 
     GameplayState gameplay_;
+
+    // GPU behavior pipeline
+    nadir::ActionSystem action_system_;
+    std::unordered_map<std::string, std::vector<BehaviorOutput>> gpu_outputs_;
+    bool gpu_pipeline_ready_ = false;
 
     // Scene path for restart
     std::filesystem::path scene_path_;
@@ -92,6 +102,11 @@ private:
     void spawn_enemy_projectile(const vec3& origin, const vec3& direction);
     bool is_enemy_archetype(const std::string& name) const;
     static vec4 archetype_color(const std::string& name);
+
+    // GPU pipeline helpers
+    void readback_gpu_outputs(GameContext& ctx);
+    void upload_to_gpu(GameContext& ctx);
+    void tick_action_system(float dt);
 };
 
 } // namespace odyssey

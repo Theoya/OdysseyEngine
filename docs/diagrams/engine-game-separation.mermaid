@@ -1,0 +1,55 @@
+%%{init: {'theme': 'dark', 'themeVariables': {'primaryColor': '#1e293b', 'primaryTextColor': '#e0e0e0', 'lineColor': '#6c63ff'}}}%%
+graph LR
+    subgraph GAMEDEV["Your Game"]
+        direction TB
+        GAME_IMPL["MyGame : Game<br/>─────────────<br/>on_init()<br/>on_tick()<br/>get_renderables()<br/>get_hud_params()<br/>on_shutdown()"]
+        FACTORY["create_game()<br/><i>factory function</i>"]
+        GAME_CFG["engine.xml<br/><i>scene, behaviors,<br/>window settings</i>"]
+        NADIR_FILES[".nadir behaviors<br/><i>GPU AI shaders</i>"]
+        SCENE_FILES[".scene.xml<br/><i>entity layout</i>"]
+
+        GAME_IMPL --> FACTORY
+    end
+
+    subgraph ENGINE["OdysseyEngine"]
+        direction TB
+        ENTRY["odyssey_main.cpp<br/><i>calls create_game()</i>"]
+
+        subgraph IFACE["Engine Interface"]
+            GAME_ABC["Game<br/><i>abstract class</i>"]
+            CONTEXT["GameContext<br/><i>camera, input, nadir,<br/>entity_mgr, delta_time</i>"]
+            RENT["RenderEntity<br/><i>pos, color, scale, mesh</i>"]
+            HUD["HUDParams<br/><i>health, alerts, CRT fx</i>"]
+        end
+
+        subgraph SYSTEMS["Engine Systems"]
+            ENG_CORE["Engine<br/>Window + Resize + Fullscreen"]
+            RENDERER["Renderer<br/>Forward + Depth"]
+            POSTPROC["PostProcessor<br/>CRT + EVA HUD"]
+            NADIR_SYS["NadirSystem<br/>GPU Compute"]
+            SCENE_SYS["SceneLoader<br/>Entity Manager"]
+        end
+    end
+
+    FACTORY -->|"returns unique_ptr"| ENTRY
+    ENTRY -->|"on_init / on_tick"| GAME_ABC
+    GAME_ABC -->|"provides"| CONTEXT
+    GAME_ABC -->|"reads"| RENT
+    GAME_ABC -->|"reads"| HUD
+    GAME_CFG -.->|"parsed by"| ENG_CORE
+    NADIR_FILES -.->|"compiled by"| NADIR_SYS
+    SCENE_FILES -.->|"loaded by"| SCENE_SYS
+    CONTEXT --> SYSTEMS
+
+    style GAMEDEV fill:#2d1b69,stroke:#a78bfa,stroke-width:3px,color:#e0e0e0
+    style ENGINE fill:#0f172a,stroke:#38bdf8,stroke-width:3px,color:#e0e0e0
+    style IFACE fill:#1e293b,stroke:#fbbf24,stroke-width:2px,color:#e0e0e0
+    style SYSTEMS fill:#1e293b,stroke:#34d399,stroke-width:2px,color:#e0e0e0
+    style GAME_IMPL fill:#4c1d95,stroke:#c4b5fd,stroke-width:2px,color:#e0e0e0
+    style FACTORY fill:#4c1d95,stroke:#c4b5fd,stroke-width:1px,color:#e0e0e0
+    style GAME_ABC fill:#1e3a5f,stroke:#fbbf24,stroke-width:2px,color:#e0e0e0
+    style ENTRY fill:#1e3a5f,stroke:#38bdf8,stroke-width:2px,color:#e0e0e0
+    style ENG_CORE fill:#14532d,stroke:#4ade80,stroke-width:1px,color:#e0e0e0
+    style RENDERER fill:#14532d,stroke:#f472b6,stroke-width:1px,color:#e0e0e0
+    style POSTPROC fill:#14532d,stroke:#f472b6,stroke-width:1px,color:#e0e0e0
+    style NADIR_SYS fill:#14532d,stroke:#34d399,stroke-width:1px,color:#e0e0e0

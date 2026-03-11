@@ -4,6 +4,7 @@
 #include "scene/scene_loader.h"
 #include "scene/entity_manager.h"
 #include "nadir/nadir_system.h"
+#include "nadir/action_sequence.h"
 
 #include <spdlog/spdlog.h>
 #include <glm/gtc/constants.hpp>
@@ -114,7 +115,7 @@ Result<bool> ShooterGame::on_init(GameContext& ctx) {
         RenderEntity ground{};
         ground.position = {0.f, 0.f, 0.f};
         ground.color = {0.15f, 0.35f, 0.1f, 1.0f};
-        ground.scale = 1.0f;
+        ground.scale = vec3(1.0f);
         ground.mesh_type = 2;
         renderables_.push_back(ground);
 
@@ -134,9 +135,22 @@ Result<bool> ShooterGame::on_init(GameContext& ctx) {
 
         ArchetypeMapping mapping{};
         mapping.archetype_name = arch_name;
+        mapping.nadir_name = arch_name;
         mapping.start_index = static_cast<uint32_t>(renderables_.size());
         mapping.count = static_cast<uint32_t>(group.entity_ids.size());
         mapping.color = color;
+
+        // Resolve NadirSystem archetype name (scene name may differ from shader stem)
+        if (ctx.nadir_sys && !ctx.nadir_sys->get_archetype(arch_name)) {
+            auto info_it = archetype_info.find(arch_name);
+            if (info_it != archetype_info.end() && !info_it->second.shader_path.empty()) {
+                std::string stem =
+                    std::filesystem::path(info_it->second.shader_path).stem().string();
+                if (ctx.nadir_sys->get_archetype(stem)) {
+                    mapping.nadir_name = stem;
+                }
+            }
+        }
 
         float entity_health = -1.0f;
         bool enemy = is_enemy_archetype(arch_name);
@@ -154,7 +168,7 @@ Result<bool> ShooterGame::on_init(GameContext& ctx) {
             RenderEntity re{};
             re.position = pos;
             re.color = color;
-            re.scale = uniform_scale;
+            re.scale = vec3(uniform_scale);
             re.mesh_type = mesh_type;
             renderables_.push_back(re);
 
@@ -166,6 +180,7 @@ Result<bool> ShooterGame::on_init(GameContext& ctx) {
             sim.alive = true;
             sim.is_enemy = enemy;
             sim.attack_cooldown = 2.0f + phase_dist(rng) * 0.5f;
+            sim.entity_id = eid;
             entity_sims_.push_back(sim);
 
             if (enemy) {
@@ -176,6 +191,31 @@ Result<bool> ShooterGame::on_init(GameContext& ctx) {
 
         archetype_mappings_.push_back(mapping);
     }
+
+    // Set actual entity counts in NadirSystem (buffers were allocated for 1024)
+    for (const auto& mapping : archetype_mappings_) {
+        if (ctx.nadir_sys) {
+            ctx.nadir_sys->set_entity_count(mapping.nadir_name, mapping.count);
+        }
+    }
+
+    // Load action sequences
+    action_system_ = nadir::ActionSystem{};
+    const std::filesystem::path actions_dir = "demo/actions";
+    for (const auto& mapping : archetype_mappings_) {
+        std::filesystem::path action_path =
+            actions_dir / (mapping.archetype_name + ".actions.xml");
+        if (std::filesystem::exists(action_path)) {
+            auto result = nadir::parse_action_set(action_path);
+            if (result.is_ok()) {
+                action_system_.register_action_set(mapping.archetype_name,
+                                                    std::move(result.value()));
+            }
+        }
+    }
+
+    gpu_pipeline_ready_ = true;
+    frame_number_ = 0;
 
     spdlog::info("ShooterGame: {} renderables, {} enemies", renderables_.size(), gameplay_.enemies_total);
     return Result<bool>::ok(true);
@@ -193,6 +233,11 @@ void ShooterGame::on_tick(GameContext& ctx) {
 
     camera_position_ = ctx.camera->position();
 
+    // Readback GPU behavior outputs
+    if (gpu_pipeline_ready_ && ctx.nadir_sys) {
+        readback_gpu_outputs(ctx);
+    }
+
     // Game over handling
     if (gameplay_.game_over) {
         gameplay_.game_over_timer += dt;
@@ -203,6 +248,8 @@ void ShooterGame::on_tick(GameContext& ctx) {
             grace_period_ = 3.0f;
             prev_health_ = gameplay_.player_max_health;
             projectiles_.clear();
+            action_system_.cancel_all();
+            gpu_outputs_.clear();
             on_init(ctx);
         }
         return;
@@ -218,6 +265,9 @@ void ShooterGame::on_tick(GameContext& ctx) {
     tick_projectiles(dt);
     tick_enemies(dt);
     check_collisions();
+
+    // Action system
+    tick_action_system(dt);
 
     // Grace period
     if (grace_period_ > 0.f) {
@@ -237,7 +287,7 @@ void ShooterGame::on_tick(GameContext& ctx) {
                 if (!entity_sims_[idx].alive) continue;
 
                 float dist = glm::length(renderables_[idx].position - camera_position_);
-                if (dist < ENEMY_ATTACK_RANGE * renderables_[idx].scale) {
+                if (dist < ENEMY_ATTACK_RANGE * renderables_[idx].scale.x) {
                     gameplay_.player_health -= dps * dt;
                 }
             }
@@ -275,6 +325,11 @@ void ShooterGame::on_tick(GameContext& ctx) {
         gameplay_.game_over = true;
         gameplay_.player_won = true;
         spdlog::info("VICTORY! All enemies defeated. Score: {}", gameplay_.score);
+    }
+
+    // Upload current state to GPU for next frame's compute
+    if (gpu_pipeline_ready_ && ctx.nadir_sys) {
+        upload_to_gpu(ctx);
     }
 }
 
@@ -339,6 +394,8 @@ HUDParams ShooterGame::get_hud_params() const {
 // on_shutdown
 // ---------------------------------------------------------------------------
 void ShooterGame::on_shutdown() {
+    action_system_.cancel_all();
+    gpu_outputs_.clear();
     renderables_.clear();
     entity_sims_.clear();
     archetype_mappings_.clear();
@@ -367,7 +424,7 @@ void ShooterGame::shoot(const vec3& origin, const vec3& direction) {
     RenderEntity re{};
     re.position = spawn_pos;
     re.color = {1.0f, 1.0f, 0.2f, 1.0f};
-    re.scale = 0.15f;
+    re.scale = vec3(0.15f);
     re.mesh_type = 1;
     proj.render_index = static_cast<uint32_t>(renderables_.size());
     renderables_.push_back(re);
@@ -393,7 +450,7 @@ void ShooterGame::spawn_enemy_projectile(const vec3& origin, const vec3& directi
     RenderEntity re{};
     re.position = origin;
     re.color = {1.0f, 0.3f, 0.1f, 1.0f};
-    re.scale = 0.12f;
+    re.scale = vec3(0.12f);
     re.mesh_type = 1;
     proj.render_index = static_cast<uint32_t>(renderables_.size());
     renderables_.push_back(re);
@@ -424,7 +481,7 @@ void ShooterGame::tick_projectiles(float dt) {
             it->position.y < -10.f) {
             if (it->render_index < renderables_.size()) {
                 renderables_[it->render_index].position = {0.f, -100.f, 0.f};
-                renderables_[it->render_index].scale = 0.f;
+                renderables_[it->render_index].scale = vec3(0.f);
             }
             it = projectiles_.erase(it);
         } else {
@@ -434,11 +491,18 @@ void ShooterGame::tick_projectiles(float dt) {
 }
 
 // ---------------------------------------------------------------------------
-// tick_enemies
+// tick_enemies — GPU-driven movement + attack via BehaviorOutput readback
 // ---------------------------------------------------------------------------
 void ShooterGame::tick_enemies(float dt) {
     for (const auto& mapping : archetype_mappings_) {
         const std::string& arch = mapping.archetype_name;
+
+        // Look up GPU outputs for this archetype (may be empty on first frames)
+        const std::vector<BehaviorOutput>* outputs = nullptr;
+        auto out_it = gpu_outputs_.find(arch);
+        if (out_it != gpu_outputs_.end() && !out_it->second.empty()) {
+            outputs = &out_it->second;
+        }
 
         for (uint32_t i = 0; i < mapping.count; ++i) {
             uint32_t idx = mapping.start_index + i;
@@ -447,17 +511,17 @@ void ShooterGame::tick_enemies(float dt) {
             RenderEntity& re = renderables_[idx];
             EntitySim& sim = entity_sims_[idx];
 
-            // Death animation
+            // Death animation (CPU-side, kept as-is)
             if (!sim.alive) {
                 if (sim.death_timer > 0.f) {
                     sim.death_timer -= dt;
                     float t = sim.death_timer / 0.5f;
-                    re.scale = t * 1.5f;
+                    re.scale = vec3(t * 1.5f);
                     re.color = {1.f, 1.f, 1.f, t};
                     re.position.y += dt * 3.0f;
                 } else {
                     re.position = {0.f, -100.f, 0.f};
-                    re.scale = 0.f;
+                    re.scale = vec3(0.f);
                 }
                 continue;
             }
@@ -467,106 +531,54 @@ void ShooterGame::tick_enemies(float dt) {
                 re.position.y = sim.spawn_position.y + 0.15f * std::sin(elapsed_time_ * 2.0f);
                 player_position_ = re.position;
             }
-            else if (arch == "enemy_pack_hunter" || arch == "multi_arm_gunner") {
-                float speed_mult = (arch == "multi_arm_gunner") ? 0.6f : 1.2f;
-                float angle = elapsed_time_ * speed_mult + sim.phase;
-                float patrol_radius = (arch == "multi_arm_gunner") ? 5.0f : 3.0f;
+            else if (is_enemy_archetype(arch) || arch == "civilian") {
+                // GPU-driven movement
+                if (outputs && i < outputs->size()) {
+                    const BehaviorOutput& out = (*outputs)[i];
+                    vec3 move = vec3(out.move_vector);
+                    float weight = out.move_vector.w;
 
-                vec3 patrol_pos = sim.spawn_position;
-                patrol_pos.x += patrol_radius * std::cos(angle);
-                patrol_pos.z += patrol_radius * std::sin(angle);
-
-                float aggro_range = (arch == "multi_arm_gunner") ? 40.0f : 25.0f;
-                float chase_speed = (arch == "multi_arm_gunner") ? 3.0f : 6.0f;
-                float dist_to_player = glm::length(
-                    vec3(re.position.x, 0, re.position.z) -
-                    vec3(camera_position_.x, 0, camera_position_.z));
-
-                if (dist_to_player < aggro_range && dist_to_player > 0.1f) {
-                    vec3 to_player = glm::normalize(camera_position_ - re.position);
-                    to_player.y = 0;
-                    if (glm::length(to_player) > 0.01f) to_player = glm::normalize(to_player);
-                    float chase_blend = 1.0f - (dist_to_player / aggro_range);
-                    chase_blend = chase_blend * chase_blend;
-                    vec3 chase_offset = to_player * chase_speed * dt;
-                    re.position = glm::mix(patrol_pos, re.position + chase_offset, chase_blend);
-                    re.position.y = sim.spawn_position.y;
-                } else {
-                    re.position = patrol_pos;
-                    re.position.y = sim.spawn_position.y;
-                }
-
-                // Boss ranged attack
-                if (arch == "multi_arm_gunner") {
-                    sim.attack_cooldown -= dt;
-                    if (sim.attack_cooldown <= 0.f && dist_to_player < aggro_range) {
-                        sim.attack_cooldown = ENEMY_RANGED_COOLDOWN * 0.8f;
-                        vec3 dir = glm::normalize(camera_position_ - re.position);
-                        spawn_enemy_projectile(re.position + dir * 2.f, dir);
+                    if (weight > 0.01f) {
+                        re.position += move * dt * weight;
+                        re.position.y = sim.spawn_position.y; // ground clamp
                     }
-                }
 
-                if (sim.health >= 0 && sim.health < sim.max_health) {
-                    float flash_anim = std::sin(elapsed_time_ * 10.f) * 0.5f + 0.5f;
-                    float health_ratio = sim.health / sim.max_health;
-                    re.color = glm::mix(vec4(1.f, 0.f, 0.f, 1.f),
-                                        archetype_color(arch),
-                                        std::max(health_ratio, flash_anim * 0.5f));
-                }
-            }
-            else if (arch == "enemy_ranged") {
-                float angle = elapsed_time_ * 0.8f + sim.phase;
-                float orbit_radius = 5.0f;
+                    // GPU-driven attack
+                    if (sim.is_enemy) {
+                        float attack_weight = out.attack_target.w;
+                        if (attack_weight > 0.5f) {
+                            vec3 target = vec3(out.attack_target);
+                            vec3 diff = target - re.position;
+                            float len = glm::length(diff);
+                            if (len > 0.1f) {
+                                vec3 dir = diff / len;
+                                float offset = (arch == "multi_arm_gunner") ? 2.0f : 1.5f;
+                                spawn_enemy_projectile(re.position + dir * offset, dir);
+                            }
+                        }
 
-                vec3 orbit_pos = sim.spawn_position;
-                orbit_pos.x += orbit_radius * std::cos(angle);
-                orbit_pos.z += orbit_radius * std::sin(angle);
-                orbit_pos.y = sim.spawn_position.y + 0.5f * std::sin(elapsed_time_ * 1.5f + sim.phase);
-
-                float dist_to_player = glm::length(
-                    vec3(re.position.x, 0, re.position.z) -
-                    vec3(camera_position_.x, 0, camera_position_.z));
-                float ideal_range = 20.0f;
-                float aggro_range = 35.0f;
-
-                if (dist_to_player < aggro_range && dist_to_player > 0.1f) {
-                    vec3 to_player = camera_position_ - re.position;
-                    to_player.y = 0;
-                    if (glm::length(to_player) > 0.01f) to_player = glm::normalize(to_player);
-                    vec3 strafe = glm::cross(to_player, vec3(0, 1, 0));
-                    float strafe_dir = (std::sin(sim.phase) > 0.f) ? 1.f : -1.f;
-                    float range_error = (dist_to_player - ideal_range) / ideal_range;
-                    vec3 approach = to_player * range_error * 2.0f;
-                    re.position += (strafe * strafe_dir * 3.0f + approach) * dt;
-                    re.position.y = orbit_pos.y;
+                        // Feed action_request to ActionSystem
+                        if (out.action_request != 0) {
+                            nadir::ActionRequest req;
+                            req.entity = sim.entity_id;
+                            req.sequence_id = out.action_request;
+                            req.priority = out.action_priority;
+                            action_system_.queue_action_request(req, arch);
+                        }
+                    }
                 } else {
-                    re.position = orbit_pos;
+                    // Fallback: no GPU output yet, keep at spawn position
+                    re.position = sim.spawn_position;
                 }
 
-                sim.attack_cooldown -= dt;
-                if (sim.attack_cooldown <= 0.f && dist_to_player < aggro_range) {
-                    sim.attack_cooldown = ENEMY_RANGED_COOLDOWN;
-                    vec3 dir = glm::normalize(camera_position_ - re.position);
-                    spawn_enemy_projectile(re.position + dir * 1.5f, dir);
-                }
-
-                if (sim.health >= 0 && sim.health < sim.max_health) {
+                // Health flash coloring (CPU-side, kept as-is)
+                if (sim.is_enemy && sim.health >= 0 && sim.health < sim.max_health) {
                     float flash_anim = std::sin(elapsed_time_ * 10.f) * 0.5f + 0.5f;
                     float health_ratio = sim.health / sim.max_health;
                     re.color = glm::mix(vec4(1.f, 0.f, 0.f, 1.f),
                                         archetype_color(arch),
                                         std::max(health_ratio, flash_anim * 0.5f));
                 }
-            }
-            else if (arch == "civilian") {
-                float wx = std::sin(elapsed_time_ * 0.7f + sim.phase)
-                         + 0.5f * std::sin(elapsed_time_ * 1.3f + sim.phase * 2.1f);
-                float wz = std::cos(elapsed_time_ * 0.9f + sim.phase)
-                         + 0.5f * std::cos(elapsed_time_ * 1.7f + sim.phase * 1.7f);
-                float wander_radius = 2.5f;
-                re.position.x = sim.spawn_position.x + wander_radius * wx * 0.5f;
-                re.position.z = sim.spawn_position.z + wander_radius * wz * 0.5f;
-                re.position.y = sim.spawn_position.y;
             }
         }
     }
@@ -601,7 +613,7 @@ void ShooterGame::check_collisions() {
 
                     const RenderEntity& re = renderables_[idx];
                     float dist = glm::length(proj_it->position - re.position);
-                    float collision_radius = HIT_RADIUS * re.scale;
+                    float collision_radius = HIT_RADIUS * re.scale.x;
 
                     if (dist < collision_radius) {
                         sim.health -= PROJECTILE_DAMAGE;
@@ -633,13 +645,104 @@ void ShooterGame::check_collisions() {
         if (hit) {
             if (proj_it->render_index < renderables_.size()) {
                 renderables_[proj_it->render_index].position = {0.f, -100.f, 0.f};
-                renderables_[proj_it->render_index].scale = 0.f;
+                renderables_[proj_it->render_index].scale = vec3(0.f);
             }
             proj_it = projectiles_.erase(proj_it);
         } else {
             ++proj_it;
         }
     }
+}
+
+// ---------------------------------------------------------------------------
+// readback_gpu_outputs — read BehaviorOutput buffers from GPU
+// ---------------------------------------------------------------------------
+void ShooterGame::readback_gpu_outputs(GameContext& ctx) {
+    gpu_outputs_.clear();
+    for (const auto& mapping : archetype_mappings_) {
+        if (!is_enemy_archetype(mapping.archetype_name) &&
+            mapping.archetype_name != "civilian") continue;
+        if (mapping.nadir_name.empty()) continue;
+
+        auto result = ctx.nadir_sys->readback_outputs(mapping.nadir_name);
+        if (result.is_ok()) {
+            gpu_outputs_[mapping.archetype_name] = std::move(result.value());
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// upload_to_gpu — send current positions/stats/world_state to GPU
+// ---------------------------------------------------------------------------
+void ShooterGame::upload_to_gpu(GameContext& ctx) {
+    for (const auto& mapping : archetype_mappings_) {
+        // Only upload archetypes that have behavior shaders in NadirSystem
+        if (mapping.nadir_name.empty()) continue;
+        if (!ctx.nadir_sys->get_archetype(mapping.nadir_name)) continue;
+
+        // Build position array (vec4 per entity)
+        std::vector<vec4> positions(mapping.count);
+        for (uint32_t i = 0; i < mapping.count; ++i) {
+            uint32_t idx = mapping.start_index + i;
+            positions[i] = vec4(renderables_[idx].position, 1.0f);
+        }
+        ctx.nadir_sys->upload_transforms(mapping.nadir_name,
+                                          positions.data(), mapping.count);
+
+        // Build stats array
+        std::vector<EntityStats> stats(mapping.count);
+        for (uint32_t i = 0; i < mapping.count; ++i) {
+            uint32_t idx = mapping.start_index + i;
+            auto& s = stats[i];
+            s.health = entity_sims_[idx].health;
+            s.max_health = entity_sims_[idx].max_health;
+            s.speed = 5.0f;
+            s.ammo = 0.0f;
+            s.stamina = 100.0f;
+        }
+        ctx.nadir_sys->upload_stats(mapping.nadir_name,
+                                     stats.data(), mapping.count);
+    }
+
+    // Upload world state to all archetypes
+    ctx.nadir_sys->upload_world_state_all(
+        elapsed_time_, ctx.delta_time, camera_position_, frame_number_++);
+}
+
+// ---------------------------------------------------------------------------
+// tick_action_system — advance action sequences, consume outputs
+// ---------------------------------------------------------------------------
+void ShooterGame::tick_action_system(float dt) {
+    action_system_.tick(dt);
+
+    // Consume destroy requests
+    auto destroy_list = action_system_.consume_destroy_requests();
+    for (EntityID eid : destroy_list) {
+        // Find the entity and mark as dead
+        for (size_t i = 0; i < entity_sims_.size(); ++i) {
+            if (entity_sims_[i].entity_id == eid && entity_sims_[i].alive) {
+                entity_sims_[i].alive = false;
+                entity_sims_[i].death_timer = 0.5f;
+                if (entity_sims_[i].is_enemy) {
+                    gameplay_.enemies_alive--;
+                    gameplay_.score += KILL_SCORE;
+                }
+                break;
+            }
+        }
+    }
+
+    // Consume persist writes (logged for now, full writeback in future)
+    auto persist_writes = action_system_.consume_persist_writes();
+    (void)persist_writes;
+
+    // Consume remaining outputs (sound, spawn, signal — logged only)
+    auto sounds = action_system_.consume_sound_requests();
+    (void)sounds;
+    auto spawns = action_system_.consume_spawn_requests();
+    (void)spawns;
+    auto signals = action_system_.consume_signal_writes();
+    (void)signals;
 }
 
 // ---------------------------------------------------------------------------

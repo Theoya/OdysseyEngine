@@ -94,7 +94,7 @@ odyssey compile --shader <path> [options]
 **Examples:**
 ```bash
 # Compile a behavior shader
-odyssey compile --shader behaviors/shaders/test_flock.nadir
+odyssey compile --shader demo/behaviors/test_flock.nadir
 
 # Compile with custom output path
 odyssey compile --shader my_behavior.nadir --output build/my_behavior.spv
@@ -110,8 +110,8 @@ odyssey compile --shader my_behavior.nadir --dump-preamble
 ```json
 {
   "status": "success",
-  "input": "behaviors/shaders/test_flock.nadir",
-  "output": "behaviors/shaders/test_flock.nadir.spv",
+  "input": "demo/behaviors/test_flock.nadir",
+  "output": "demo/behaviors/test_flock.nadir.spv",
   "spirv_size_bytes": 2048,
   "warnings": []
 }
@@ -121,7 +121,7 @@ odyssey compile --shader my_behavior.nadir --dump-preamble
 ```json
 {
   "status": "error",
-  "input": "behaviors/shaders/broken.nadir",
+  "input": "demo/behaviors/broken.nadir",
   "errors": [
     {
       "line": 15,
@@ -390,7 +390,7 @@ All commands support `--json` for machine-readable output. Combine with standard
 odyssey inspect --scene my_scene.scene.xml --json | jq '.archetypes[].count'
 
 # Compile all .nadir files and collect errors
-for f in behaviors/shaders/*.nadir; do
+for f in demo/behaviors/*.nadir; do
     odyssey compile --shader "$f" --json
 done | jq 'select(.status == "error")'
 

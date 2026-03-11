@@ -50,6 +50,8 @@ void main() {
     outputs[idx].sound_priority = danger * 0.5;
     outputs[idx].comms_signal = 0.0;
     outputs[idx].comms_urgency = 0.0;
+    outputs[idx].action_request = 0u;
+    outputs[idx].action_priority = 0.0;
 
     persist[idx].current_state = new_state;
     persist[idx].state_timer = timer;

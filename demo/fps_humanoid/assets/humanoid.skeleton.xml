@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<skeleton name="humanoid">
+  <!-- Root/Hips -->
+  <bone name="root" parent="" position="0 0.95 0" rotation="0 0 0 1" length="0.1" radius="0.04"/>
+
+  <!-- Spine chain -->
+  <bone name="spine" parent="root" position="0 0.2 0" rotation="0 0 0 1" length="0.2" radius="0.035"/>
+  <bone name="chest" parent="spine" position="0 0.2 0" rotation="0 0 0 1" length="0.2" radius="0.035"/>
+
+  <!-- Head -->
+  <bone name="neck" parent="chest" position="0 0.2 0" rotation="0 0 0 1" length="0.1" radius="0.025"/>
+  <bone name="head" parent="neck" position="0 0.1 0" rotation="0 0 0 1" length="0.2" radius="0.08"/>
+
+  <!-- Left arm -->
+  <bone name="shoulder_l" parent="chest" position="-0.15 0 0" rotation="0 0 0 1" length="0.05" radius="0.03"/>
+  <bone name="upper_arm_l" parent="shoulder_l" position="0 -0.28 0" rotation="0 0 0 1" length="0.28" radius="0.025"/>
+  <bone name="lower_arm_l" parent="upper_arm_l" position="0 -0.25 0" rotation="0 0 0 1" length="0.25" radius="0.02"/>
+  <bone name="hand_l" parent="lower_arm_l" position="0 -0.1 0" rotation="0 0 0 1" length="0.1" radius="0.02"/>
+
+  <!-- Right arm -->
+  <bone name="shoulder_r" parent="chest" position="0.15 0 0" rotation="0 0 0 1" length="0.05" radius="0.03"/>
+  <bone name="upper_arm_r" parent="shoulder_r" position="0 -0.28 0" rotation="0 0 0 1" length="0.28" radius="0.025"/>
+  <bone name="lower_arm_r" parent="upper_arm_r" position="0 -0.25 0" rotation="0 0 0 1" length="0.25" radius="0.02"/>
+  <bone name="hand_r" parent="lower_arm_r" position="0 -0.1 0" rotation="0 0 0 1" length="0.1" radius="0.02"/>
+
+  <!-- Left leg -->
+  <bone name="upper_leg_l" parent="root" position="-0.1 -0.4 0" rotation="0 0 0 1" length="0.4" radius="0.03"/>
+  <bone name="lower_leg_l" parent="upper_leg_l" position="0 -0.4 0" rotation="0 0 0 1" length="0.4" radius="0.025"/>
+  <bone name="foot_l" parent="lower_leg_l" position="0 -0.15 0" rotation="0 0 0 1" length="0.15" radius="0.025"/>
+
+  <!-- Right leg -->
+  <bone name="upper_leg_r" parent="root" position="0.1 -0.4 0" rotation="0 0 0 1" length="0.4" radius="0.03"/>
+  <bone name="lower_leg_r" parent="upper_leg_r" position="0 -0.4 0" rotation="0 0 0 1" length="0.4" radius="0.025"/>
+  <bone name="foot_r" parent="lower_leg_r" position="0 -0.15 0" rotation="0 0 0 1" length="0.15" radius="0.025"/>
+
+  <!-- Attachments -->
+  <attachment name="right_hand_grip" bone="hand_r" position="0 -0.05 0.02" rotation="0 0 0 1"/>
+  <attachment name="left_hand_grip" bone="hand_l" position="0 -0.05 0.02" rotation="0 0 0 1"/>
+  <attachment name="muzzle" bone="hand_r" position="0 -0.05 0.35" rotation="0 0 0 1"/>
+</skeleton>

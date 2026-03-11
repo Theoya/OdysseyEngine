@@ -52,6 +52,10 @@ public:
     void apply(VkCommandBuffer cmd, uint32_t swapchain_image_index,
                const CRTParams& crt, const EvaHUDParams& eva);
 
+    /// Recreate all extent-dependent resources after swapchain resize.
+    Result<bool> recreate_for_resize(VkExtent2D new_extent,
+                                      const std::vector<VkImageView>& new_swapchain_views);
+
     /// Must be called after swapchain recreation to rebuild post framebuffers.
     Result<bool> set_swapchain_views(const std::vector<VkImageView>& views, VkExtent2D extent);
 
@@ -59,6 +63,7 @@ private:
     VkDevice device_ = VK_NULL_HANDLE;
     VmaAllocator allocator_ = VK_NULL_HANDLE;
     VkExtent2D extent_{};
+    VkFormat color_format_ = VK_FORMAT_UNDEFINED;
 
     // Offscreen render target (scene renders here)
     VkImage offscreen_image_ = VK_NULL_HANDLE;

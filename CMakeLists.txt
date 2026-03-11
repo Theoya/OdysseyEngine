@@ -36,10 +36,12 @@ file(GLOB_RECURSE ASSETS_SOURCES    CONFIGURE_DEPENDS "src/assets/*.cpp"    "src
 file(GLOB_RECURSE SCRIPTING_SOURCES CONFIGURE_DEPENDS "src/scripting/*.cpp" "src/scripting/*.h")
 file(GLOB_RECURSE CLI_SOURCES       CONFIGURE_DEPENDS "src/cli/*.cpp"       "src/cli/*.h")
 file(GLOB_RECURSE APP_SOURCES       CONFIGURE_DEPENDS "src/app/*.cpp"       "src/app/*.h")
-list(FILTER APP_SOURCES EXCLUDE REGEX "main\\.cpp$")
+list(FILTER APP_SOURCES EXCLUDE REGEX "odyssey_main\\.cpp$")
 file(GLOB_RECURSE NET_SOURCES       CONFIGURE_DEPENDS "src/net/*.cpp"       "src/net/*.h")
 file(GLOB_RECURSE MCP_SOURCES       CONFIGURE_DEPENDS "src/mcp/*.cpp"       "src/mcp/*.h")
 file(GLOB_RECURSE DEBUG_SOURCES     CONFIGURE_DEPENDS "src/debug/*.cpp"     "src/debug/*.h")
+file(GLOB_RECURSE ANIM_SOURCES      CONFIGURE_DEPENDS "src/animation/*.cpp" "src/animation/*.h")
+file(GLOB_RECURSE PHYSICS_SOURCES   CONFIGURE_DEPENDS "src/physics/*.cpp"   "src/physics/*.h")
 
 set(ENGINE_SOURCES
     ${CORE_SOURCES}
@@ -53,6 +55,8 @@ set(ENGINE_SOURCES
     ${NET_SOURCES}
     ${MCP_SOURCES}
     ${DEBUG_SOURCES}
+    ${ANIM_SOURCES}
+    ${PHYSICS_SOURCES}
 )
 
 # ── Engine static library ───────────────────────────────────────────────────
@@ -80,19 +84,42 @@ if(WIN32)
   target_link_libraries(odyssey_engine PUBLIC ws2_32)
 endif()
 
-# ── Main executable (engine + game) ──────────────────────────────────────────
+# Engine-provided entry point — games just implement create_game().
+set(ODYSSEY_MAIN_SOURCE "${CMAKE_CURRENT_SOURCE_DIR}/src/app/odyssey_main.cpp")
+
+# ── Shooter demo (game executable) ──────────────────────────────────────────
 # Game sources live outside the engine library — this is the key separation.
-# To create a new game, replace these with your own game files.
-file(GLOB_RECURSE GAME_SOURCES CONFIGURE_DEPENDS "demo/*.cpp" "demo/*.h")
+# To create a new game, copy the template/ directory and replace these.
+file(GLOB SHOOTER_SOURCES CONFIGURE_DEPENDS
+  "demo/shooter_game.cpp" "demo/shooter_game.h"
+  "demo/scripts/*.cpp" "demo/scripts/*.h"
+)
 
-add_executable(odyssey src/app/main.cpp ${GAME_SOURCES})
+add_executable(odyssey_shooter ${ODYSSEY_MAIN_SOURCE} ${SHOOTER_SOURCES})
 
-target_include_directories(odyssey
+target_include_directories(odyssey_shooter
   PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/demo
 )
 
-target_link_libraries(odyssey
+target_link_libraries(odyssey_shooter
+  PRIVATE
+    odyssey_engine
+)
+
+# ── FPS humanoid demo (game executable) ────────────────────────────────────
+file(GLOB_RECURSE FPS_SOURCES CONFIGURE_DEPENDS
+  "demo/fps_humanoid/*.cpp" "demo/fps_humanoid/*.h"
+)
+
+add_executable(odyssey_fps ${ODYSSEY_MAIN_SOURCE} ${FPS_SOURCES})
+
+target_include_directories(odyssey_fps
+  PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/demo
+)
+
+target_link_libraries(odyssey_fps
   PRIVATE
     odyssey_engine
 )
@@ -123,14 +150,11 @@ if(PIPELINE_TEST_SOURCES)
   add_test(NAME pipeline_tests COMMAND odyssey_tests_pipeline)
 endif()
 
-# ── Copy runtime assets to build output ───────────────────────────────────────
-add_custom_target(copy_assets ALL
+# ── Copy engine assets to build output ────────────────────────────────────────
+add_custom_target(copy_engine_assets ALL
   COMMAND ${CMAKE_COMMAND} -E copy_directory
-    "${CMAKE_CURRENT_SOURCE_DIR}/behaviors"
-    "${CMAKE_CURRENT_BINARY_DIR}/behaviors"
-  COMMAND ${CMAKE_COMMAND} -E copy_directory
-    "${CMAKE_CURRENT_SOURCE_DIR}/demo"
-    "${CMAKE_CURRENT_BINARY_DIR}/demo"
+    "${CMAKE_CURRENT_SOURCE_DIR}/behaviors/lib"
+    "${CMAKE_CURRENT_BINARY_DIR}/behaviors/lib"
   COMMAND ${CMAKE_COMMAND} -E copy_directory
     "${CMAKE_CURRENT_SOURCE_DIR}/shaders"
     "${CMAKE_CURRENT_BINARY_DIR}/shaders"
@@ -140,10 +164,20 @@ add_custom_target(copy_assets ALL
   COMMAND ${CMAKE_COMMAND} -E copy_if_different
     "${CMAKE_CURRENT_SOURCE_DIR}/engine.xml"
     "${CMAKE_CURRENT_BINARY_DIR}/engine.xml"
-  COMMENT "Copying runtime assets to build directory"
+  COMMENT "Copying engine assets to build directory"
 )
 
-add_dependencies(odyssey copy_assets)
+# ── Copy demo assets to build output ──────────────────────────────────────────
+add_custom_target(copy_demo_assets ALL
+  COMMAND ${CMAKE_COMMAND} -E copy_directory
+    "${CMAKE_CURRENT_SOURCE_DIR}/demo"
+    "${CMAKE_CURRENT_BINARY_DIR}/demo"
+  COMMENT "Copying demo assets to build directory"
+)
+
+add_dependencies(odyssey_shooter copy_engine_assets copy_demo_assets)
+add_dependencies(odyssey_fps copy_engine_assets copy_demo_assets)
+add_dependencies(odyssey_tests_unit copy_engine_assets)
 
 # ── Windows: help find Vulkan SDK ────────────────────────────────────────────
 if(WIN32 AND DEFINED ENV{VULKAN_SDK})

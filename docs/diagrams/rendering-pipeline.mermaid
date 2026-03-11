@@ -1,0 +1,69 @@
+%%{init: {'theme': 'dark', 'themeVariables': {'primaryColor': '#1e293b', 'primaryTextColor': '#e0e0e0', 'lineColor': '#f472b6'}}}%%
+flowchart LR
+    subgraph FRAME["Per-Frame Rendering"]
+        direction LR
+
+        ACQ["Acquire<br/>Swapchain Image"]
+
+        subgraph COMPUTE["GPU Compute"]
+            NADIR["Nadir Dispatch<br/><i>All archetypes</i>"]
+        end
+
+        subgraph SCENE["Scene Pass"]
+            direction TB
+            OFS_FB["Offscreen<br/>Framebuffer"]
+            DEPTH["Depth Buffer<br/>D32_SFLOAT"]
+            REND["Renderer<br/>Push constants<br/>MVP + Color"]
+            MESHES["Primitives<br/>Box / Sphere / Ground"]
+
+            REND --> MESHES
+            MESHES --> OFS_FB
+            DEPTH --> OFS_FB
+        end
+
+        subgraph POST["Post-Process Pass"]
+            direction TB
+            CRT["CRT Effect<br/><i>Scanlines, curvature,<br/>chromatic aberration,<br/>vignette, flicker</i>"]
+            EVA["EVA HUD Overlay<br/><i>Health bar, alerts,<br/>sync ratio, borders</i><br/><i>α-blended</i>"]
+            SWAP_FB["Swapchain<br/>Framebuffer"]
+
+            CRT --> SWAP_FB
+            EVA --> SWAP_FB
+        end
+
+        PRESENT["Present<br/>to Display"]
+    end
+
+    ACQ --> NADIR
+    NADIR --> REND
+    OFS_FB -->|"sampled<br/>texture"| CRT
+    OFS_FB -->|"sampled<br/>texture"| EVA
+    SWAP_FB --> PRESENT
+
+    subgraph RESIZE["On Resize / F11"]
+        direction TB
+        RE_SC["Recreate Swapchain"]
+        RE_DEPTH["New Depth Buffer"]
+        RE_OFS["New Offscreen Target"]
+        RE_DESC["Update Descriptor Set"]
+        RE_FB["New Framebuffers"]
+
+        RE_SC --> RE_DEPTH --> RE_OFS --> RE_DESC --> RE_FB
+    end
+
+    PRESENT -.->|"OUT_OF_DATE"| RESIZE
+    RESIZE -.-> ACQ
+
+    style FRAME fill:#0f172a,stroke:#38bdf8,stroke-width:2px,color:#e0e0e0
+    style COMPUTE fill:#14532d,stroke:#34d399,stroke-width:2px,color:#e0e0e0
+    style SCENE fill:#1e293b,stroke:#f472b6,stroke-width:2px,color:#e0e0e0
+    style POST fill:#2d1b69,stroke:#a78bfa,stroke-width:2px,color:#e0e0e0
+    style RESIZE fill:#7c2d12,stroke:#fb923c,stroke-width:2px,color:#e0e0e0
+    style CRT fill:#4c1d95,stroke:#c4b5fd,stroke-width:1px,color:#e0e0e0
+    style EVA fill:#4c1d95,stroke:#c4b5fd,stroke-width:1px,color:#e0e0e0
+    style NADIR fill:#14532d,stroke:#4ade80,stroke-width:1px,color:#e0e0e0
+    style REND fill:#1e3a5f,stroke:#f472b6,stroke-width:1px,color:#e0e0e0
+    style ACQ fill:#1e3a5f,stroke:#38bdf8,stroke-width:1px,color:#e0e0e0
+    style PRESENT fill:#1e3a5f,stroke:#38bdf8,stroke-width:1px,color:#e0e0e0
+    style RE_SC fill:#7c2d12,stroke:#fb923c,stroke-width:1px,color:#e0e0e0
+    style RE_OFS fill:#7c2d12,stroke:#fb923c,stroke-width:1px,color:#e0e0e0

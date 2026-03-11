@@ -1,41 +1,74 @@
+%%{init: {'theme': 'dark', 'themeVariables': {'primaryColor': '#1a1a2e', 'primaryTextColor': '#e0e0e0', 'lineColor': '#6c63ff'}}}%%
 graph TB
-    subgraph "Build System"
-        CMAKE[CMakeLists.txt]
-        VCPKG[vcpkg.json<br/>Dependencies]
-
-        subgraph "Libraries"
-            CORE[core/<br/>types.h, result.h]
-            VULKAN_LIB[vulkan/<br/>instance, device, swapchain<br/>buffer, pipeline, command]
-            NADIR_LIB[nadir/<br/>system, compiler, buffers]
-        end
-
-        subgraph "Executables"
-            ODYSSEY[odyssey<br/>Main executable]
-            TESTS_U[odyssey_tests_unit<br/>Unit tests]
-            TESTS_P[odyssey_tests_pipeline<br/>Pipeline tests]
-        end
-
-        subgraph "Shader Assets"
-            GLSL_LIB[behaviors/lib/<br/>scoring.glsl, steering.glsl]
-            NADIR_SHADERS[behaviors/shaders/<br/>*.nadir files]
-        end
+    subgraph BUILD["Build System"]
+        CMAKE["CMakeLists.txt"]
+        VCPKG["vcpkg<br/>Dependencies"]
     end
 
-    CMAKE --> CORE
-    CMAKE --> VULKAN_LIB
-    CMAKE --> NADIR_LIB
+    subgraph LIB["odyssey_engine (static library)"]
+        direction LR
+        CORE["core/<br/>types, result"]
+        VULKAN_LIB["vulkan/<br/>instance, device, swapchain<br/>renderer, postprocess, buffer<br/>pipeline, command"]
+        NADIR_LIB["nadir/<br/>system, compiler, buffers"]
+        SCENE_LIB["scene/<br/>entity_manager, loaders"]
+        APP_LIB["app/<br/>engine, camera, input, game"]
+        NET_LIB["net/<br/>socket, server, client"]
+    end
+
+    subgraph EXEC["Executables"]
+        SHOOTER["odyssey_shooter<br/>Shooter demo"]
+        TESTS_U["odyssey_tests_unit<br/>118 unit tests"]
+        TESTS_P["odyssey_tests_pipeline<br/>GPU pipeline tests"]
+    end
+
+    subgraph GAME_SRC["Game Sources"]
+        DEMO["demo/<br/>shooter_game.cpp"]
+        DEMO_B["demo/behaviors/<br/>7 .nadir files"]
+        DEMO_S["demo/scenes/<br/>.scene.xml"]
+    end
+
+    subgraph ENGINE_ASSETS["Engine Assets"]
+        GLSL_LIB["behaviors/lib/<br/>scoring, steering,<br/>spatial, state_machine"]
+        SHADERS["shaders/<br/>CRT, EVA HUD"]
+        SCHEMAS["schemas/<br/>XSD validation"]
+        CONFIG["engine.xml"]
+    end
+
+    subgraph TMPL["template/ (new game starter)"]
+        TMPL_CMAKE["CMakeLists.txt"]
+        TMPL_GAME["my_game.h/cpp"]
+        TMPL_CFG["engine.xml"]
+    end
+
+    MAIN_CPP["odyssey_main.cpp<br/>Engine entry point"]
+
     VCPKG --> CMAKE
+    CMAKE --> LIB
+    CMAKE --> EXEC
 
     CORE --> VULKAN_LIB
     CORE --> NADIR_LIB
     VULKAN_LIB --> NADIR_LIB
 
-    NADIR_LIB --> ODYSSEY
-    VULKAN_LIB --> ODYSSEY
+    LIB --> SHOOTER
+    LIB --> TESTS_U
+    LIB --> TESTS_P
 
-    NADIR_LIB --> TESTS_U
-    NADIR_LIB --> TESTS_P
-    VULKAN_LIB --> TESTS_U
-    VULKAN_LIB --> TESTS_P
+    MAIN_CPP --> SHOOTER
+    DEMO --> SHOOTER
+    DEMO_B -.-> DEMO
+    DEMO_S -.-> DEMO
 
-    GLSL_LIB --> NADIR_SHADERS
+    GLSL_LIB -.-> DEMO_B
+
+    ENGINE_ASSETS -.->|copy_engine_assets| EXEC
+    GAME_SRC -.->|copy_demo_assets| SHOOTER
+
+    TMPL_CMAKE -.->|add_subdirectory| LIB
+
+    style BUILD fill:#1e293b,stroke:#fbbf24,stroke-width:2px,color:#e0e0e0
+    style LIB fill:#0f172a,stroke:#38bdf8,stroke-width:2px,color:#e0e0e0
+    style EXEC fill:#1e293b,stroke:#34d399,stroke-width:2px,color:#e0e0e0
+    style GAME_SRC fill:#2d1b69,stroke:#a78bfa,stroke-width:2px,color:#e0e0e0
+    style ENGINE_ASSETS fill:#1e293b,stroke:#f472b6,stroke-width:1px,color:#e0e0e0
+    style TMPL fill:#1e293b,stroke:#94a3b8,stroke-width:1px,color:#e0e0e0

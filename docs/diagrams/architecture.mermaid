@@ -1,40 +1,94 @@
+%%{init: {'theme': 'dark', 'themeVariables': {'primaryColor': '#1a1a2e', 'primaryTextColor': '#e0e0e0', 'primaryBorderColor': '#6c63ff', 'lineColor': '#6c63ff', 'secondaryColor': '#16213e', 'tertiaryColor': '#0f3460'}}}%%
 graph TB
-    subgraph "OdysseyEngine"
-        CLI[CLI Interface<br/>odyssey commands]
-        APP[Application<br/>Main Loop]
-
-        subgraph "GPU Pipeline"
-            NADIR[Nadir System<br/>Behavior Dispatch]
-            COMPILER[Behavior Compiler<br/>shaderc GLSL to SPIR-V]
-            BUFFERS[Buffer Manager<br/>SSBO Layout]
-        end
-
-        subgraph "Vulkan Layer"
-            INST[Instance]
-            DEV[Device + VMA]
-            SWAP[Swapchain]
-            PIPE[Compute Pipeline]
-            CMD[Command Buffers]
-        end
-
-        subgraph "Assets"
-            SCENES[Scene Loader<br/>.scene.xml]
-            PREFABS[Prefab Loader<br/>.prefab.xml]
-            SHADERS[Behavior Shaders<br/>.nadir files]
-        end
+    subgraph GAME["Game Layer"]
+        direction LR
+        SHOOTER["Shooter Demo<br/><i>shooter_game.cpp</i>"]
+        TEMPLATE["Template Game<br/><i>template/my_game.cpp</i>"]
+        FACTORY["create_game() factory"]
     end
 
-    CLI --> APP
-    APP --> NADIR
+    subgraph ENGINE["Engine (odyssey_engine)"]
+        subgraph APP["Application"]
+            direction LR
+            CLI["CLI Interface<br/>odyssey commands"]
+            ENG["Engine<br/>Main Loop + Resize"]
+            MAIN["odyssey_main.cpp<br/>Entry Point"]
+            INPUT["InputManager<br/>GLFW + F11"]
+            CAM["Camera<br/>FPS mouselook"]
+        end
+
+        subgraph RENDER["Rendering Pipeline"]
+            direction LR
+            REND["Renderer<br/>Forward + Depth"]
+            POST["PostProcessor<br/>CRT + EVA HUD"]
+        end
+
+        subgraph GPU["GPU Pipeline (Nadir)"]
+            direction LR
+            NADIR["NadirSystem<br/>Behavior Dispatch"]
+            COMPILER["BehaviorCompiler<br/>shaderc → SPIR-V"]
+            BUFFERS["NadirBuffers<br/>7 SSBOs"]
+        end
+
+        subgraph VK["Vulkan Abstraction"]
+            direction LR
+            INST["Instance"]
+            DEV["Device + VMA"]
+            SWAP["Swapchain<br/>+ Resize"]
+            PIPE["Compute Pipeline"]
+            CMD["Command Buffers"]
+        end
+
+        subgraph ASSETS["Assets"]
+            direction LR
+            SCENES["Scene Loader<br/>.scene.xml"]
+            PREFABS["Prefab Loader<br/>.prefab.xml"]
+            SHADERS["Behavior Shaders<br/>.nadir files"]
+            GLSLLIB["GLSL Library<br/>behaviors/lib/"]
+        end
+
+        CORE["Core Types<br/>types.h  result.h"]
+    end
+
+    SHOOTER --> FACTORY
+    TEMPLATE --> FACTORY
+    FACTORY --> MAIN
+    MAIN --> ENG
+    CLI --> ENG
+
+    ENG --> NADIR
+    ENG --> REND
+    ENG --> POST
+    ENG --> INPUT
+    ENG --> CAM
+
     NADIR --> COMPILER
     NADIR --> BUFFERS
     NADIR --> PIPE
+
+    REND --> DEV
+    POST --> DEV
+    REND --> SWAP
+    POST --> SWAP
+
     BUFFERS --> DEV
     PIPE --> DEV
     CMD --> DEV
-    APP --> SWAP
     SWAP --> DEV
     DEV --> INST
-    SCENES --> APP
+
+    SCENES --> ENG
     PREFABS --> SCENES
     SHADERS --> COMPILER
+    GLSLLIB --> COMPILER
+
+    VK --> CORE
+
+    style GAME fill:#2d1b69,stroke:#a78bfa,stroke-width:2px,color:#e0e0e0
+    style ENGINE fill:#0f172a,stroke:#38bdf8,stroke-width:2px,color:#e0e0e0
+    style APP fill:#1e293b,stroke:#60a5fa,stroke-width:1px,color:#e0e0e0
+    style RENDER fill:#1e293b,stroke:#f472b6,stroke-width:1px,color:#e0e0e0
+    style GPU fill:#1e293b,stroke:#34d399,stroke-width:1px,color:#e0e0e0
+    style VK fill:#1e293b,stroke:#fbbf24,stroke-width:1px,color:#e0e0e0
+    style ASSETS fill:#1e293b,stroke:#a78bfa,stroke-width:1px,color:#e0e0e0
+    style CORE fill:#334155,stroke:#94a3b8,stroke-width:1px,color:#e0e0e0

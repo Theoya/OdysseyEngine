@@ -127,6 +127,33 @@ void main() {
     outputs[idx].comms_signal = shield_score; // repurpose for shield
     outputs[idx].comms_urgency = incoming_damage_norm;
 
+    // Action requests
+    uint action_req = 0u;
+    float action_pri = 0.0;
+
+    // Enter combat cinematic on first player sighting
+    float combat_intro_done = persist[idx].memory_1.y;
+    if (new_state == STATE_COMBAT && combat_intro_done < 0.5 && prox > 0.2) {
+        action_req = 3u;
+        action_pri = 0.7;
+    }
+
+    // Overload attack when all weapon scores high
+    if (shotgun_score > 0.4 && sniper_score > 0.4 && smg_score > 0.4) {
+        action_req = 4u;
+        action_pri = 0.9;
+    }
+
+    // Shield taunt when in cover with high shield score
+    float shield_taunt_done = persist[idx].memory_1.w;
+    if (new_state == STATE_COVER && shield_score > 0.5 && shield_taunt_done < 0.5) {
+        action_req = 5u;
+        action_pri = 0.5;
+    }
+
+    outputs[idx].action_request = action_req;
+    outputs[idx].action_priority = action_pri;
+
     // Update state
     persist[idx].current_state = new_state;
     persist[idx].state_timer = state_timer;

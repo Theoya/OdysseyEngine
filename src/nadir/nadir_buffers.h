@@ -72,6 +72,9 @@ struct BufferSet {
     VmaAllocation output_alloc = VK_NULL_HANDLE;
     VmaAllocation debug_alloc = VK_NULL_HANDLE;
 
+    // Host-mapped pointer for world_state UBO (non-null when host-visible)
+    void* world_state_mapped = nullptr;
+
     BufferSetLayout layout;
 };
 

@@ -20,6 +20,7 @@ struct EngineConfig {
     uint32_t window_height = 1080;
     std::string window_title = "OdysseyEngine";
     bool vsync = true;
+    bool fullscreen = false;
     bool validation_layers = true;
     uint32_t gpu_index = 0;
 
@@ -30,7 +31,7 @@ struct EngineConfig {
     uint32_t max_agents = 100000;
 
     // Scene
-    std::filesystem::path scene_path = "demo/scenes/shooter_arena.scene.xml";
+    std::filesystem::path scene_path;
 
     // Shaders
     std::filesystem::path shader_dir = "shaders";
@@ -86,6 +87,16 @@ private:
 
     bool running_ = false;
     GLFWwindow* window_ = nullptr;
+
+    // Resize / fullscreen
+    bool framebuffer_resized_ = false;
+    bool fullscreen_ = false;
+    bool f11_was_pressed_ = false;
+    int windowed_x_ = 0, windowed_y_ = 0;
+    int windowed_w_ = 1920, windowed_h_ = 1080;
+
+    void recreate_swapchain();
+    void toggle_fullscreen();
 
     // Frame tracking
     uint32_t current_frame_ = 0;

@@ -675,9 +675,10 @@ Result<bool> PostProcessor::initialize(
     VkCommandPool command_pool,
     const std::filesystem::path& shader_dir)
 {
-    device_    = device_ctx.device;
-    allocator_ = device_ctx.allocator;
-    extent_    = extent;
+    device_       = device_ctx.device;
+    allocator_    = device_ctx.allocator;
+    extent_       = extent;
+    color_format_ = color_format;
 
     // 1. Create offscreen render target (color + depth + sampler)
     auto result = create_offscreen_target(extent, color_format);
@@ -768,6 +769,80 @@ Result<bool> PostProcessor::initialize(
     }
 
     spdlog::info("PostProcessor initialized ({}x{})", extent.width, extent.height);
+    return Result<bool>::ok(true);
+}
+
+// ---------------------------------------------------------------------------
+// PostProcessor::recreate_for_resize
+// ---------------------------------------------------------------------------
+
+Result<bool> PostProcessor::recreate_for_resize(VkExtent2D new_extent,
+                                                 const std::vector<VkImageView>& new_swapchain_views) {
+    // Destroy old framebuffers
+    if (scene_framebuffer_ != VK_NULL_HANDLE) {
+        vkDestroyFramebuffer(device_, scene_framebuffer_, nullptr);
+        scene_framebuffer_ = VK_NULL_HANDLE;
+    }
+    for (auto fb : post_framebuffers_) {
+        if (fb != VK_NULL_HANDLE) {
+            vkDestroyFramebuffer(device_, fb, nullptr);
+        }
+    }
+    post_framebuffers_.clear();
+
+    // Destroy old offscreen resources
+    if (offscreen_sampler_ != VK_NULL_HANDLE) {
+        vkDestroySampler(device_, offscreen_sampler_, nullptr);
+        offscreen_sampler_ = VK_NULL_HANDLE;
+    }
+    if (offscreen_view_ != VK_NULL_HANDLE) {
+        vkDestroyImageView(device_, offscreen_view_, nullptr);
+        offscreen_view_ = VK_NULL_HANDLE;
+    }
+    if (offscreen_image_ != VK_NULL_HANDLE) {
+        vmaDestroyImage(allocator_, offscreen_image_, offscreen_alloc_);
+        offscreen_image_ = VK_NULL_HANDLE;
+        offscreen_alloc_ = VK_NULL_HANDLE;
+    }
+    if (offscreen_depth_view_ != VK_NULL_HANDLE) {
+        vkDestroyImageView(device_, offscreen_depth_view_, nullptr);
+        offscreen_depth_view_ = VK_NULL_HANDLE;
+    }
+    if (offscreen_depth_ != VK_NULL_HANDLE) {
+        vmaDestroyImage(allocator_, offscreen_depth_, offscreen_depth_alloc_);
+        offscreen_depth_ = VK_NULL_HANDLE;
+        offscreen_depth_alloc_ = VK_NULL_HANDLE;
+    }
+
+    // Update state
+    extent_ = new_extent;
+    swapchain_views_ = new_swapchain_views;
+
+    // Recreate offscreen target at new size
+    auto ot_res = create_offscreen_target(new_extent, color_format_);
+    if (ot_res.is_err()) return ot_res;
+
+    // Update descriptor set to point to new offscreen image
+    VkDescriptorImageInfo img_info{};
+    img_info.sampler     = offscreen_sampler_;
+    img_info.imageView   = offscreen_view_;
+    img_info.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+
+    VkWriteDescriptorSet write{};
+    write.sType           = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+    write.dstSet          = descriptor_set_;
+    write.dstBinding      = 0;
+    write.dstArrayElement = 0;
+    write.descriptorCount = 1;
+    write.descriptorType  = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+    write.pImageInfo      = &img_info;
+    vkUpdateDescriptorSets(device_, 1, &write, 0, nullptr);
+
+    // Recreate framebuffers
+    auto fb_res = create_framebuffers();
+    if (fb_res.is_err()) return fb_res;
+
+    spdlog::info("PostProcessor resized to {}x{}", new_extent.width, new_extent.height);
     return Result<bool>::ok(true);
 }
 

@@ -113,6 +113,7 @@ Result<EngineConfig> parse_engine_config(const std::filesystem::path& config_pat
         config.window_height = win.attribute("height").as_uint(config.window_height);
         config.window_title  = win.attribute("title").as_string(config.window_title.c_str());
         config.vsync         = win.attribute("vsync").as_bool(config.vsync);
+        config.fullscreen    = win.attribute("fullscreen").as_bool(config.fullscreen);
     }
 
     // Vulkan settings
@@ -127,6 +128,11 @@ Result<EngineConfig> parse_engine_config(const std::filesystem::path& config_pat
         config.lib_dir      = nadir.attribute("lib_dir").as_string(config.lib_dir.string().c_str());
         config.hot_reload   = nadir.attribute("hot_reload").as_bool(config.hot_reload);
         config.max_agents   = nadir.attribute("max_agents").as_uint(config.max_agents);
+    }
+
+    // Scene settings
+    if (auto scene = root.child("scene")) {
+        config.scene_path = scene.attribute("path").as_string(config.scene_path.string().c_str());
     }
 #else
     // Without pugixml, check that the file at least exists.
@@ -225,11 +231,24 @@ Result<bool> Engine::init_window(const EngineConfig& config) {
     glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);   // Vulkan — no OpenGL
     glfwWindowHint(GLFW_RESIZABLE, GLFW_TRUE);
 
-    window_ = glfwCreateWindow(
-        static_cast<int>(config.window_width),
-        static_cast<int>(config.window_height),
+    GLFWmonitor* monitor = nullptr;
+    int win_w = static_cast<int>(config.window_width);
+    int win_h = static_cast<int>(config.window_height);
+
+    if (config.fullscreen) {
+        monitor = glfwGetPrimaryMonitor();
+        const GLFWvidmode* mode = glfwGetVideoMode(monitor);
+        win_w = mode->width;
+        win_h = mode->height;
+        fullscreen_ = true;
+    } else {
+        windowed_w_ = win_w;
+        windowed_h_ = win_h;
+    }
+
+    window_ = glfwCreateWindow(win_w, win_h,
         config.window_title.c_str(),
-        nullptr, nullptr);
+        monitor, nullptr);
 
     if (!window_) {
         glfwTerminate();
@@ -241,8 +260,9 @@ Result<bool> Engine::init_window(const EngineConfig& config) {
 
     // Framebuffer resize callback
     glfwSetFramebufferSizeCallback(window_,
-        [](GLFWwindow* /*w*/, int /*width*/, int /*height*/) {
-            spdlog::info("Framebuffer resized");
+        [](GLFWwindow* w, int /*width*/, int /*height*/) {
+            auto* engine = static_cast<Engine*>(glfwGetWindowUserPointer(w));
+            if (engine) engine->framebuffer_resized_ = true;
         });
 
     spdlog::info("GLFW window created");
@@ -394,6 +414,9 @@ Result<bool> Engine::init_nadir(const EngineConfig& config) {
         spdlog::warn("Nadir load_behaviors: {}", load_res.error());
     }
 
+    // Set transfer context so upload/readback works
+    impl_->nadir_system.set_transfer_context(impl_->device_ctx, impl_->command_pool);
+
     spdlog::info("Nadir system initialized ({} archetypes)",
                  impl_->nadir_system.archetype_count());
 #else
@@ -466,7 +489,28 @@ void Engine::process_frame(float delta_time) {
             md.x, md.y);
     }
 
-    // --- Game tick ---
+    // Fullscreen toggle (F11, edge-triggered)
+    bool f11_down = impl_->input.is_key_down(GLFW_KEY_F11);
+    if (f11_down && !f11_was_pressed_) {
+        toggle_fullscreen();
+    }
+    f11_was_pressed_ = f11_down;
+
+#if ODYSSEY_HAS_VULKAN
+    // --- Wait for previous frame's GPU work to complete ---
+    auto& sync = impl_->frame_sync[current_frame_];
+    vkWaitForFences(impl_->device_ctx.device, 1, &sync.in_flight, VK_TRUE,
+                    UINT64_MAX);
+
+    // --- Hot-reload check ---
+#if ODYSSEY_HAS_NADIR
+    auto changed = impl_->nadir_system.check_hot_reload();
+    if (!changed.empty()) {
+        spdlog::info("Hot-reloaded {} behavior(s)", changed.size());
+    }
+#endif
+
+    // --- Game tick (GPU outputs now safe to readback) ---
     if (impl_->game) {
         GameContext ctx{};
         ctx.delta_time = delta_time;
@@ -482,29 +526,19 @@ void Engine::process_frame(float delta_time) {
         impl_->game->on_tick(ctx);
     }
 
-#if ODYSSEY_HAS_VULKAN
-    // --- Hot-reload check ---
-#if ODYSSEY_HAS_NADIR
-    auto changed = impl_->nadir_system.check_hot_reload();
-    if (!changed.empty()) {
-        spdlog::info("Hot-reloaded {} behavior(s)", changed.size());
-    }
-#endif
-
     // --- Acquire image ---
-    auto& sync = impl_->frame_sync[current_frame_];
-    vkWaitForFences(impl_->device_ctx.device, 1, &sync.in_flight, VK_TRUE,
-                    UINT64_MAX);
-    vkResetFences(impl_->device_ctx.device, 1, &sync.in_flight);
-
     uint32_t image_index = 0;
     VkResult acquire = vkAcquireNextImageKHR(
         impl_->device_ctx.device, impl_->swapchain_ctx.swapchain, UINT64_MAX,
         sync.image_available, VK_NULL_HANDLE, &image_index);
 
     if (acquire == VK_ERROR_OUT_OF_DATE_KHR) {
+        recreate_swapchain();
         return;
     }
+
+    // Reset fence only after successful acquire (avoids deadlock on resize)
+    vkResetFences(impl_->device_ctx.device, 1, &sync.in_flight);
 
     // --- Record command buffer ---
     auto cmd = impl_->command_buffers[current_frame_];
@@ -591,7 +625,13 @@ void Engine::process_frame(float delta_time) {
     present_info.pSwapchains        = &impl_->swapchain_ctx.swapchain;
     present_info.pImageIndices      = &image_index;
 
-    vkQueuePresentKHR(impl_->device_ctx.present_queue, &present_info);
+    VkResult present_result = vkQueuePresentKHR(impl_->device_ctx.present_queue, &present_info);
+
+    if (present_result == VK_ERROR_OUT_OF_DATE_KHR ||
+        present_result == VK_SUBOPTIMAL_KHR ||
+        framebuffer_resized_) {
+        recreate_swapchain();
+    }
 
     current_frame_ = (current_frame_ + 1) % vulkan::MAX_FRAMES_IN_FLIGHT;
 
@@ -603,7 +643,18 @@ void Engine::process_frame(float delta_time) {
         }
     }
 #else
-    (void)delta_time;
+    // Non-Vulkan: game tick without GPU
+    if (impl_->game) {
+        GameContext ctx{};
+        ctx.delta_time = delta_time;
+        ctx.total_time = total_time_;
+        ctx.camera = &impl_->camera;
+        ctx.input = &impl_->input;
+        ctx.entity_mgr = &impl_->entity_mgr;
+        ctx.window = window_;
+        ctx.scene_path = impl_->config.scene_path;
+        impl_->game->on_tick(ctx);
+    }
 #endif
 }
 
@@ -618,10 +669,11 @@ void Engine::render_entities(const mat4& vp) {
     const auto& renderables = impl_->game->get_renderables();
 
     for (const auto& entity : renderables) {
-        if (entity.scale <= 0.f) continue;
+        if (entity.scale.x <= 0.f) continue;
 
         mat4 model = glm::translate(mat4(1.0f), entity.position);
-        model = glm::scale(model, vec3(entity.scale));
+        model *= glm::mat4_cast(entity.rotation);
+        model = glm::scale(model, entity.scale);
 
         mat4 mvp = vp * model;
 
@@ -639,6 +691,103 @@ void Engine::render_entities(const mat4& vp) {
                          vulkan::PrimitiveType::SPHERE);
 #else
     (void)vp;
+#endif
+}
+
+// ---------------------------------------------------------------------------
+// recreate_swapchain
+// ---------------------------------------------------------------------------
+
+void Engine::recreate_swapchain() {
+#if ODYSSEY_HAS_VULKAN && ODYSSEY_HAS_GLFW
+    // Wait until framebuffer is non-zero (handles minimization)
+    int width = 0, height = 0;
+    glfwGetFramebufferSize(window_, &width, &height);
+    while (width == 0 || height == 0) {
+        glfwGetFramebufferSize(window_, &width, &height);
+        glfwWaitEvents();
+    }
+
+    vkDeviceWaitIdle(impl_->device_ctx.device);
+
+    // Save old swapchain handle for driver resource recycling
+    auto old_swapchain = impl_->swapchain_ctx.swapchain;
+
+    // Destroy old swapchain image views
+    for (auto iv : impl_->swapchain_ctx.image_views) {
+        vkDestroyImageView(impl_->device_ctx.device, iv, nullptr);
+    }
+    impl_->swapchain_ctx.image_views.clear();
+    impl_->swapchain_ctx.images.clear();
+
+    // Recreate swapchain (passes old handle so the driver can recycle resources)
+    auto sc_cfg = vulkan::compute_swapchain_config(
+        impl_->device_ctx.physical_device, impl_->surface,
+        static_cast<uint32_t>(width), static_cast<uint32_t>(height),
+        impl_->config.vsync);
+    auto sc_res = vulkan::create_swapchain(impl_->device_ctx,
+                                           impl_->surface, sc_cfg,
+                                           old_swapchain);
+
+    // Destroy retired old swapchain
+    vkDestroySwapchainKHR(impl_->device_ctx.device, old_swapchain, nullptr);
+
+    if (sc_res.is_err()) {
+        spdlog::error("Failed to recreate swapchain: {}", sc_res.error());
+        return;
+    }
+    impl_->swapchain_ctx = sc_res.value();
+
+    // Recreate renderer depth buffer + framebuffers
+    auto ren_res = impl_->renderer.recreate_for_resize(
+        impl_->swapchain_ctx.extent, impl_->swapchain_ctx.image_views);
+    if (ren_res.is_err()) {
+        spdlog::error("Renderer resize failed: {}", ren_res.error());
+    }
+
+    // Recreate post-processor offscreen target + framebuffers
+    if (impl_->has_postprocessor) {
+        auto pp_res = impl_->postprocessor.recreate_for_resize(
+            impl_->swapchain_ctx.extent, impl_->swapchain_ctx.image_views);
+        if (pp_res.is_err()) {
+            spdlog::error("PostProcessor resize failed: {}", pp_res.error());
+        }
+    }
+
+    framebuffer_resized_ = false;
+    spdlog::info("Swapchain recreated: {}x{}",
+                 impl_->swapchain_ctx.extent.width,
+                 impl_->swapchain_ctx.extent.height);
+#endif
+}
+
+// ---------------------------------------------------------------------------
+// toggle_fullscreen
+// ---------------------------------------------------------------------------
+
+void Engine::toggle_fullscreen() {
+#if ODYSSEY_HAS_GLFW
+    if (!window_) return;
+
+    fullscreen_ = !fullscreen_;
+
+    if (fullscreen_) {
+        // Save windowed geometry
+        glfwGetWindowPos(window_, &windowed_x_, &windowed_y_);
+        glfwGetWindowSize(window_, &windowed_w_, &windowed_h_);
+
+        GLFWmonitor* monitor = glfwGetPrimaryMonitor();
+        const GLFWvidmode* mode = glfwGetVideoMode(monitor);
+        glfwSetWindowMonitor(window_, monitor, 0, 0,
+                             mode->width, mode->height, mode->refreshRate);
+    } else {
+        glfwSetWindowMonitor(window_, nullptr,
+                             windowed_x_, windowed_y_,
+                             windowed_w_, windowed_h_, 0);
+    }
+
+    framebuffer_resized_ = true;
+    spdlog::info("Fullscreen: {}", fullscreen_ ? "on" : "off");
 #endif
 }
 

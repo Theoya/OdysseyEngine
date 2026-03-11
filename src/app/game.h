@@ -20,9 +20,10 @@ namespace nadir { class NadirSystem; }
 // Renderable entity data — games produce these, engine draws them.
 struct RenderEntity {
     vec3 position;
+    quat rotation{1.0f, 0.0f, 0.0f, 0.0f};
     vec4 color;         // RGBA
-    float scale;        // uniform scale
-    uint32_t mesh_type; // 0=box, 1=sphere, 2=ground
+    vec3 scale{1.0f};   // non-uniform scale
+    uint32_t mesh_type; // 0=box, 1=sphere, 2=ground, 3=cylinder
 };
 
 // HUD parameters that the game can set each frame.

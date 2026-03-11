@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<scene name="flat_arena">
+  <entity archetype="player" count="1">
+    <transform position="0 1 0" scale="1 1 1"/>
+    <stats health="150" max_health="150"/>
+  </entity>
+</scene>

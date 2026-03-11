@@ -134,6 +134,31 @@ void main() {
     outputs[idx].comms_signal = comms_weight;
     outputs[idx].comms_urgency = combat_score;
 
+    // Action requests
+    uint action_req = 0u;
+    float action_pri = 0.0;
+
+    // Patrol route when patrolling for >3s and no sequence running
+    if (new_state == STATE_PATROL && state_timer > 3.0) {
+        action_req = 1u;
+        action_pri = 0.3;
+    }
+
+    // Taunt when entering alert state
+    if (new_state == STATE_ALERT && state != STATE_ALERT) {
+        action_req = 3u;
+        action_pri = 0.6;
+    }
+
+    // Regroup when outnumbered and damaged
+    if (ally_count < 2.0 && damage_norm > 0.5) {
+        action_req = 4u;
+        action_pri = 0.8;
+    }
+
+    outputs[idx].action_request = action_req;
+    outputs[idx].action_priority = action_pri;
+
     // Update persistent state
     persist[idx].current_state = new_state;
     persist[idx].state_timer = state_timer;

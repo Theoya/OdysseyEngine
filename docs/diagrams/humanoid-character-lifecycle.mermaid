@@ -1,0 +1,31 @@
+sequenceDiagram
+    participant G as FPSGame
+    participant HC as HumanoidCharacter
+    participant AP as AnimationPlayer
+    participant IK as IK Solver
+    participant CS as CollisionSystem
+    participant SR as SkeletonRenderer
+    participant R as Renderer
+
+    Note over G: Each Frame
+
+    G->>HC: update(dt, pos, rot, speed, ground_h)
+    HC->>AP: evaluate(dt)
+    AP-->>HC: local_transforms[]
+
+    HC->>HC: compute_world_transforms()
+
+    HC->>CS: ground_height_at(foot_x, foot_z)
+    CS-->>HC: ground_y
+
+    HC->>IK: solve_two_bone_ik(hip, knee, foot, target)
+    IK-->>HC: adjusted rotations
+
+    HC->>SR: skeleton_to_renderables(skel, transforms)
+    SR-->>HC: bone_entities[]
+
+    HC->>SR: attachment_to_renderables("right_hand_grip", gun)
+    SR-->>HC: gun_entities[]
+
+    G->>G: rebuild_renderables()
+    G->>R: draw(all_entities)

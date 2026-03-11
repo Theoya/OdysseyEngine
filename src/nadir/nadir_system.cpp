@@ -1,9 +1,11 @@
 #include "nadir/nadir_system.h"
+#include "vulkan/buffer.h"
 
 #include <spdlog/spdlog.h>
 
 #include <algorithm>
 #include <array>
+#include <cstring>
 #include <fstream>
 
 namespace odyssey::nadir {
@@ -321,6 +323,148 @@ const Archetype* NadirSystem::get_archetype(const std::string& name) const {
         return nullptr;
     }
     return &archetypes_[it->second];
+}
+
+// ---------------------------------------------------------------------------
+// Transfer context
+// ---------------------------------------------------------------------------
+
+void NadirSystem::set_transfer_context(const vulkan::DeviceContext& device_ctx,
+                                        VkCommandPool transfer_pool) {
+    device_ctx_ = &device_ctx;
+    transfer_pool_ = transfer_pool;
+}
+
+void NadirSystem::set_entity_count(const std::string& name, uint32_t count) {
+    auto it = archetype_index_.find(name);
+    if (it != archetype_index_.end()) {
+        archetypes_[it->second].entity_count = count;
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Upload / readback
+// ---------------------------------------------------------------------------
+
+Result<bool> NadirSystem::upload_transforms(const std::string& archetype,
+                                             const vec4* data, uint32_t count) {
+    if (!device_ctx_ || transfer_pool_ == VK_NULL_HANDLE)
+        return Result<bool>::err("Transfer context not set");
+    auto it = archetype_index_.find(archetype);
+    if (it == archetype_index_.end())
+        return Result<bool>::err("Archetype not found: " + archetype);
+
+    auto& arch = archetypes_[it->second];
+    VkDeviceSize size = static_cast<VkDeviceSize>(count) * BufferSetLayout::POSITION_STRIDE;
+
+    vulkan::Buffer dst{};
+    dst.buffer = arch.buffers.transforms;
+    dst.allocation = arch.buffers.transform_alloc;
+    dst.size = arch.buffers.layout.transform_size;
+
+    return vulkan::upload_buffer_data(allocator_, *device_ctx_, transfer_pool_, dst, data, size);
+}
+
+Result<bool> NadirSystem::upload_stats(const std::string& archetype,
+                                        const EntityStats* data, uint32_t count) {
+    if (!device_ctx_ || transfer_pool_ == VK_NULL_HANDLE)
+        return Result<bool>::err("Transfer context not set");
+    auto it = archetype_index_.find(archetype);
+    if (it == archetype_index_.end())
+        return Result<bool>::err("Archetype not found: " + archetype);
+
+    auto& arch = archetypes_[it->second];
+    VkDeviceSize size = static_cast<VkDeviceSize>(count) * BufferSetLayout::STATS_STRIDE;
+
+    vulkan::Buffer dst{};
+    dst.buffer = arch.buffers.stats;
+    dst.allocation = arch.buffers.stats_alloc;
+    dst.size = arch.buffers.layout.stats_size;
+
+    return vulkan::upload_buffer_data(allocator_, *device_ctx_, transfer_pool_, dst, data, size);
+}
+
+void NadirSystem::upload_world_state_all(float world_time, float delta_time,
+                                          const vec3& player_pos,
+                                          uint32_t frame_number) {
+    // std140-aligned WorldState matching GLSL UBO layout
+    struct WorldStateGPU {
+        float world_time;        // offset 0
+        float delta_time;        // offset 4
+        float _pad0;             // offset 8
+        float _pad1;             // offset 12
+        float player_pos[4];     // offset 16
+        uint32_t frame_number;   // offset 32
+        uint32_t total_entities; // offset 36
+        float _pad2;             // offset 40
+        float _pad3;             // offset 44
+    };
+    static_assert(sizeof(WorldStateGPU) == 48, "Must match std140 layout");
+
+    for (auto& arch : archetypes_) {
+        if (!arch.buffers.world_state_mapped) continue;
+
+        WorldStateGPU ws{};
+        ws.world_time = world_time;
+        ws.delta_time = delta_time;
+        ws.player_pos[0] = player_pos.x;
+        ws.player_pos[1] = player_pos.y;
+        ws.player_pos[2] = player_pos.z;
+        ws.player_pos[3] = 0.0f;
+        ws.frame_number = frame_number;
+        ws.total_entities = arch.entity_count;
+
+        std::memcpy(arch.buffers.world_state_mapped, &ws, sizeof(ws));
+    }
+}
+
+Result<bool> NadirSystem::upload_persist(const std::string& archetype,
+                                          const void* data, VkDeviceSize size) {
+    if (!device_ctx_ || transfer_pool_ == VK_NULL_HANDLE)
+        return Result<bool>::err("Transfer context not set");
+    auto it = archetype_index_.find(archetype);
+    if (it == archetype_index_.end())
+        return Result<bool>::err("Archetype not found: " + archetype);
+
+    auto& arch = archetypes_[it->second];
+
+    vulkan::Buffer dst{};
+    dst.buffer = arch.buffers.persist_state;
+    dst.allocation = arch.buffers.persist_alloc;
+    dst.size = arch.buffers.layout.persist_size;
+
+    return vulkan::upload_buffer_data(allocator_, *device_ctx_, transfer_pool_, dst, data, size);
+}
+
+Result<std::vector<BehaviorOutput>> NadirSystem::readback_outputs(
+    const std::string& archetype) {
+    if (!device_ctx_ || transfer_pool_ == VK_NULL_HANDLE)
+        return Result<std::vector<BehaviorOutput>>::err("Transfer context not set");
+    auto it = archetype_index_.find(archetype);
+    if (it == archetype_index_.end())
+        return Result<std::vector<BehaviorOutput>>::err("Archetype not found: " + archetype);
+
+    const auto& arch = archetypes_[it->second];
+    VkDeviceSize size = static_cast<VkDeviceSize>(arch.entity_count)
+                      * BufferSetLayout::OUTPUT_STRIDE;
+
+    vulkan::Buffer src{};
+    src.buffer = arch.buffers.output;
+    src.allocation = arch.buffers.output_alloc;
+    src.size = size;
+
+    auto result = vulkan::readback_buffer_data(
+        allocator_, *device_ctx_, transfer_pool_, src, size);
+    if (result.is_err())
+        return Result<std::vector<BehaviorOutput>>::err(result.error());
+
+    const auto& bytes = result.value();
+    size_t count = bytes.size() / sizeof(BehaviorOutput);
+
+    std::vector<BehaviorOutput> outputs(count);
+    std::memcpy(outputs.data(), bytes.data(), count * sizeof(BehaviorOutput));
+
+    return Result<std::vector<BehaviorOutput>>::ok(std::move(outputs));
 }
 
 // ---------------------------------------------------------------------------

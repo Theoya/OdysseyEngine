@@ -80,6 +80,8 @@ void main() {
     outputs[idx].sound_priority = 0.0;
     outputs[idx].comms_signal = 0.0;
     outputs[idx].comms_urgency = 0.0;
+    outputs[idx].action_request = 0u;
+    outputs[idx].action_priority = 0.0;
 
     // Debug: output health as color intensity
     debug_data[idx] = vec4(damage_score, health_score, flee_weight, seek_weight);

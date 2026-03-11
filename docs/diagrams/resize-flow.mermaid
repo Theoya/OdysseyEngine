@@ -1,0 +1,54 @@
+%%{init: {'theme': 'dark', 'themeVariables': {'primaryColor': '#1e293b', 'primaryTextColor': '#e0e0e0', 'primaryBorderColor': '#6c63ff', 'lineColor': '#60a5fa'}}}%%
+flowchart TD
+    START(["process_frame()"])
+    START --> INPUT["Poll Input + F11 Check"]
+
+    INPUT --> F11{F11 pressed?}
+    F11 -->|Yes| TOGGLE["toggle_fullscreen()<br/>glfwSetWindowMonitor()<br/>Set framebuffer_resized_ = true"]
+    F11 -->|No| FENCE
+    TOGGLE --> FENCE
+
+    FENCE["vkWaitForFences(in_flight)"]
+    FENCE --> GAMETICK["Game::on_tick()<br/>Readback + Logic"]
+
+    GAMETICK --> ACQUIRE["vkAcquireNextImageKHR()"]
+    ACQUIRE --> ACQ_CHECK{Result?}
+
+    ACQ_CHECK -->|"OUT_OF_DATE"| RECREATE
+    ACQ_CHECK -->|"SUCCESS / SUBOPTIMAL"| RESET_FENCE
+
+    RESET_FENCE["vkResetFences(in_flight)<br/><i>Only after successful acquire</i>"]
+    RESET_FENCE --> RECORD["Record Command Buffer<br/>Nadir Dispatch + Scene Render<br/>+ CRT/EVA Post-Process"]
+
+    RECORD --> SUBMIT["vkQueueSubmit(fence)"]
+    SUBMIT --> PRESENT["vkQueuePresentKHR()"]
+
+    PRESENT --> PRES_CHECK{"Result?<br/>OR framebuffer_resized_?"}
+    PRES_CHECK -->|"OUT_OF_DATE /<br/>SUBOPTIMAL / resized"| RECREATE
+    PRES_CHECK -->|OK| DONE(["Next Frame"])
+
+    subgraph RECREATE["recreate_swapchain()"]
+        direction TB
+        R1["Handle minimization<br/>(wait if 0×0)"]
+        R1 --> R2["vkDeviceWaitIdle()"]
+        R2 --> R3["Destroy old image views"]
+        R3 --> R4["create_swapchain()<br/>(pass old handle)"]
+        R4 --> R5["Destroy retired swapchain"]
+        R5 --> R6["Renderer::recreate_for_resize()<br/>New depth buffer + framebuffers"]
+        R6 --> R7["PostProcessor::recreate_for_resize()<br/>New offscreen target + descriptor<br/>+ scene/post framebuffers"]
+        R7 --> R8["framebuffer_resized_ = false"]
+    end
+
+    RECREATE --> DONE
+
+    style START fill:#334155,stroke:#94a3b8,stroke-width:2px,color:#e0e0e0
+    style DONE fill:#334155,stroke:#94a3b8,stroke-width:2px,color:#e0e0e0
+    style RECREATE fill:#1e1b4b,stroke:#a78bfa,stroke-width:2px,color:#e0e0e0
+    style TOGGLE fill:#4c1d95,stroke:#c4b5fd,stroke-width:1px,color:#e0e0e0
+    style ACQ_CHECK fill:#7c2d12,stroke:#fb923c,stroke-width:2px,color:#e0e0e0
+    style PRES_CHECK fill:#7c2d12,stroke:#fb923c,stroke-width:2px,color:#e0e0e0
+    style F11 fill:#1e3a5f,stroke:#60a5fa,stroke-width:1px,color:#e0e0e0
+    style RESET_FENCE fill:#14532d,stroke:#4ade80,stroke-width:1px,color:#e0e0e0
+    style R4 fill:#1e3a5f,stroke:#38bdf8,stroke-width:1px,color:#e0e0e0
+    style R6 fill:#1e3a5f,stroke:#f472b6,stroke-width:1px,color:#e0e0e0
+    style R7 fill:#1e3a5f,stroke:#f472b6,stroke-width:1px,color:#e0e0e0

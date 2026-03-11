@@ -118,6 +118,7 @@ void Renderer::shutdown() {
     destroy_mesh(box_mesh_);
     destroy_mesh(sphere_mesh_);
     destroy_mesh(ground_mesh_);
+    destroy_mesh(cylinder_mesh_);
 
     if (pipeline_ != VK_NULL_HANDLE) {
         vkDestroyPipeline(device_, pipeline_, nullptr);
@@ -249,6 +250,7 @@ void Renderer::draw(const mat4& mvp, const vec4& color, PrimitiveType mesh_type)
         case PrimitiveType::BOX:          mesh = &box_mesh_;    break;
         case PrimitiveType::SPHERE:       mesh = &sphere_mesh_; break;
         case PrimitiveType::GROUND_PLANE: mesh = &ground_mesh_; break;
+        case PrimitiveType::CYLINDER:     mesh = &cylinder_mesh_; break;
     }
     if (!mesh || mesh->vertex_buffer == VK_NULL_HANDLE) return;
 
@@ -273,6 +275,63 @@ void Renderer::draw(const mat4& mvp, const vec4& color, PrimitiveType mesh_type)
 void Renderer::end_frame(VkCommandBuffer cmd) {
     vkCmdEndRenderPass(cmd);
     active_cmd_ = VK_NULL_HANDLE;
+}
+
+// ---------------------------------------------------------------------------
+// Public: recreate_for_resize
+// ---------------------------------------------------------------------------
+
+Result<bool> Renderer::recreate_for_resize(VkExtent2D new_extent,
+                                            const std::vector<VkImageView>& swapchain_views) {
+    // Destroy old depth resources
+    if (depth_view_ != VK_NULL_HANDLE) {
+        vkDestroyImageView(device_, depth_view_, nullptr);
+        depth_view_ = VK_NULL_HANDLE;
+    }
+    if (depth_image_ != VK_NULL_HANDLE) {
+        vmaDestroyImage(allocator_, depth_image_, depth_alloc_);
+        depth_image_ = VK_NULL_HANDLE;
+        depth_alloc_ = VK_NULL_HANDLE;
+    }
+
+    // Destroy old framebuffers
+    for (auto fb : framebuffers_) {
+        vkDestroyFramebuffer(device_, fb, nullptr);
+    }
+    framebuffers_.clear();
+
+    extent_ = new_extent;
+
+    // Recreate depth buffer
+    auto depth_result = create_depth_resources(new_extent);
+    if (depth_result.is_err()) return depth_result;
+
+    // Recreate framebuffers
+    framebuffers_.resize(swapchain_views.size());
+    for (size_t i = 0; i < swapchain_views.size(); ++i) {
+        std::array<VkImageView, 2> attachments = {
+            swapchain_views[i],
+            depth_view_
+        };
+
+        VkFramebufferCreateInfo ci{};
+        ci.sType           = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO;
+        ci.renderPass      = render_pass_;
+        ci.attachmentCount = static_cast<uint32_t>(attachments.size());
+        ci.pAttachments    = attachments.data();
+        ci.width           = new_extent.width;
+        ci.height          = new_extent.height;
+        ci.layers          = 1;
+
+        VkResult vr = vkCreateFramebuffer(device_, &ci, nullptr, &framebuffers_[i]);
+        if (vr != VK_SUCCESS) {
+            return Result<bool>::err(
+                "vkCreateFramebuffer failed during resize at index " + std::to_string(i));
+        }
+    }
+
+    spdlog::info("Renderer resized to {}x{}", new_extent.width, new_extent.height);
+    return Result<bool>::ok(true);
 }
 
 // ---------------------------------------------------------------------------
@@ -673,6 +732,17 @@ Result<bool> Renderer::create_primitive_meshes(VkCommandPool cmd_pool, VkQueue q
                      vertices.size(), indices.size());
     }
 
+    // Cylinder
+    {
+        auto [vertices, indices] = generate_cylinder(16);
+        cylinder_mesh_ = create_mesh(vertices, indices, cmd_pool, queue);
+        if (cylinder_mesh_.vertex_buffer == VK_NULL_HANDLE) {
+            return Result<bool>::err("Failed to create cylinder mesh");
+        }
+        spdlog::info("Cylinder mesh created ({} vertices, {} indices)",
+                     vertices.size(), indices.size());
+    }
+
     return Result<bool>::ok(true);
 }
 
@@ -914,6 +984,71 @@ std::pair<std::vector<BasicVertex>, std::vector<uint32_t>> Renderer::generate_gr
         0, 1, 2,
         0, 2, 3
     };
+
+    return {vertices, indices};
+}
+
+std::pair<std::vector<BasicVertex>, std::vector<uint32_t>> Renderer::generate_cylinder(int segments) {
+    // Unit cylinder: radius 0.5, height 1.0 (-0.5 to +0.5 on Y), centered at origin.
+    const float radius = 0.5f;
+    const float half_h = 0.5f;
+    const float pi = 3.14159265358979323846f;
+
+    std::vector<BasicVertex> vertices;
+    std::vector<uint32_t> indices;
+
+    // --- Side vertices (two rings) ---
+    for (int i = 0; i <= segments; ++i) {
+        float theta = 2.0f * pi * static_cast<float>(i) / static_cast<float>(segments);
+        float ct = std::cos(theta);
+        float st = std::sin(theta);
+        vec3 normal{ct, 0.0f, st};
+
+        vertices.push_back({{ct * radius, -half_h, st * radius}, normal}); // bottom ring
+        vertices.push_back({{ct * radius,  half_h, st * radius}, normal}); // top ring
+    }
+
+    // Side indices
+    for (int i = 0; i < segments; ++i) {
+        uint32_t bl = static_cast<uint32_t>(i * 2);
+        uint32_t tl = bl + 1;
+        uint32_t br = bl + 2;
+        uint32_t tr = bl + 3;
+        indices.push_back(bl); indices.push_back(br); indices.push_back(tl);
+        indices.push_back(tl); indices.push_back(br); indices.push_back(tr);
+    }
+
+    // --- Top cap ---
+    uint32_t top_center = static_cast<uint32_t>(vertices.size());
+    vertices.push_back({{0.0f, half_h, 0.0f}, {0.0f, 1.0f, 0.0f}});
+    uint32_t top_ring_start = static_cast<uint32_t>(vertices.size());
+    for (int i = 0; i < segments; ++i) {
+        float theta = 2.0f * pi * static_cast<float>(i) / static_cast<float>(segments);
+        vertices.push_back({{std::cos(theta) * radius, half_h, std::sin(theta) * radius},
+                            {0.0f, 1.0f, 0.0f}});
+    }
+    for (int i = 0; i < segments; ++i) {
+        uint32_t next = (i + 1) % segments;
+        indices.push_back(top_center);
+        indices.push_back(top_ring_start + static_cast<uint32_t>(i));
+        indices.push_back(top_ring_start + static_cast<uint32_t>(next));
+    }
+
+    // --- Bottom cap ---
+    uint32_t bot_center = static_cast<uint32_t>(vertices.size());
+    vertices.push_back({{0.0f, -half_h, 0.0f}, {0.0f, -1.0f, 0.0f}});
+    uint32_t bot_ring_start = static_cast<uint32_t>(vertices.size());
+    for (int i = 0; i < segments; ++i) {
+        float theta = 2.0f * pi * static_cast<float>(i) / static_cast<float>(segments);
+        vertices.push_back({{std::cos(theta) * radius, -half_h, std::sin(theta) * radius},
+                            {0.0f, -1.0f, 0.0f}});
+    }
+    for (int i = 0; i < segments; ++i) {
+        uint32_t next = (i + 1) % segments;
+        indices.push_back(bot_center);
+        indices.push_back(bot_ring_start + static_cast<uint32_t>(next));
+        indices.push_back(bot_ring_start + static_cast<uint32_t>(i));
+    }
 
     return {vertices, indices};
 }

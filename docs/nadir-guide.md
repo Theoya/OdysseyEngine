@@ -25,7 +25,7 @@ Nadir is OdysseyEngine's GPU-parallel behavior system. This guide covers everyth
 
 A `.nadir` file is a GLSL compute shader with a simplified authoring surface. The Nadir system injects a preamble that provides buffer bindings, utility functions, and the compute shader boilerplate. You write only the behavior logic.
 
-Create a new file at `behaviors/shaders/my_behavior.nadir`:
+Create a new file at `demo/behaviors/my_behavior.nadir`:
 
 ```glsl
 #include "scoring.glsl"
@@ -52,7 +52,7 @@ void main() {
 
 ```bash
 # Compile without launching the engine
-odyssey compile --shader behaviors/shaders/my_behavior.nadir
+odyssey compile --shader demo/behaviors/my_behavior.nadir
 
 # Test all shaders compile successfully
 odyssey test --shader
@@ -674,7 +674,7 @@ Each `.nadir` file should define the behavior for one archetype. If behaviors sh
 ### Flocking (Reynolds Boids)
 
 ```glsl
-// behaviors/shaders/test_flock.nadir
+// demo/behaviors/test_flock.nadir
 #include "scoring.glsl"
 #include "steering.glsl"
 
@@ -709,7 +709,7 @@ void main() {
 ### Pack Hunting
 
 ```glsl
-// behaviors/shaders/pack_hunter.nadir
+// demo/behaviors/pack_hunter.nadir
 #include "scoring.glsl"
 #include "steering.glsl"
 
@@ -778,7 +778,7 @@ void main() {
 ### Ranged Combat
 
 ```glsl
-// behaviors/shaders/ranged_soldier.nadir
+// demo/behaviors/ranged_soldier.nadir
 #include "scoring.glsl"
 #include "steering.glsl"
 
@@ -838,7 +838,7 @@ void main() {
 ### Multi-Arm Gunner
 
 ```glsl
-// behaviors/shaders/multi_arm_gunner.nadir
+// demo/behaviors/multi_arm_gunner.nadir
 // Demonstrates Nadir's multi-action advantage:
 // 4 arms independently score and engage targets simultaneously.
 // This is impossible with a behavior tree that picks one action per tick.

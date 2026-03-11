@@ -1,0 +1,33 @@
+graph TD
+    ROOT["root<br/>(hips, Y=0.95)"]
+
+    ROOT --> SPINE["spine<br/>(Y+0.2)"]
+    SPINE --> CHEST["chest<br/>(Y+0.2)"]
+
+    CHEST --> NECK["neck<br/>(Y+0.2)"]
+    NECK --> HEAD["head<br/>(Y+0.1, len=0.2)"]
+
+    CHEST --> SL["shoulder_l<br/>(-X 0.15)"]
+    SL --> UAL["upper_arm_l<br/>(len=0.28)"]
+    UAL --> LAL["lower_arm_l<br/>(len=0.25)"]
+    LAL --> HL["hand_l<br/>(len=0.1)"]
+
+    CHEST --> SR["shoulder_r<br/>(+X 0.15)"]
+    SR --> UAR["upper_arm_r<br/>(len=0.28)"]
+    UAR --> LAR["lower_arm_r<br/>(len=0.25)"]
+    LAR --> HR["hand_r<br/>(len=0.1)"]
+
+    ROOT --> ULL["upper_leg_l<br/>(-X 0.1, len=0.4)"]
+    ULL --> LLL["lower_leg_l<br/>(len=0.4)"]
+    LLL --> FL["foot_l<br/>(len=0.15)"]
+
+    ROOT --> ULR["upper_leg_r<br/>(+X 0.1, len=0.4)"]
+    ULR --> LLR["lower_leg_r<br/>(len=0.4)"]
+    LLR --> FR["foot_r<br/>(len=0.15)"]
+
+    HR -.- GRIP["right_hand_grip"]
+    HL -.- LGRIP["left_hand_grip"]
+
+    style ROOT fill:#ffd700
+    style GRIP fill:#888,color:#fff
+    style LGRIP fill:#888,color:#fff

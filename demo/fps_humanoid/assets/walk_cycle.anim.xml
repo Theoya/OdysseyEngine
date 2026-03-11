@@ -1,0 +1,70 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<animation name="walk_cycle" duration="0.8" looping="true">
+  <!-- Root bob -->
+  <track bone="root">
+    <key time="0.0" position="0 0.95 0" rotation="0 0 0 1"/>
+    <key time="0.2" position="0 0.97 0" rotation="0 0 0 1"/>
+    <key time="0.4" position="0 0.95 0" rotation="0 0 0 1"/>
+    <key time="0.6" position="0 0.97 0" rotation="0 0 0 1"/>
+    <key time="0.8" position="0 0.95 0" rotation="0 0 0 1"/>
+  </track>
+
+  <!-- Spine counter-rotation -->
+  <track bone="spine">
+    <key time="0.0" position="0 0.2 0" rotation="0 0.03 0 1"/>
+    <key time="0.2" position="0 0.2 0" rotation="0 0 0 1"/>
+    <key time="0.4" position="0 0.2 0" rotation="0 -0.03 0 1"/>
+    <key time="0.6" position="0 0.2 0" rotation="0 0 0 1"/>
+    <key time="0.8" position="0 0.2 0" rotation="0 0.03 0 1"/>
+  </track>
+
+  <!-- Right leg: forward at 0.0, back at 0.4 -->
+  <track bone="upper_leg_r">
+    <key time="0.0" position="0.1 -0.4 0" rotation="0.2 0 0 0.98"/>
+    <key time="0.2" position="0.1 -0.4 0" rotation="0 0 0 1"/>
+    <key time="0.4" position="0.1 -0.4 0" rotation="-0.2 0 0 0.98"/>
+    <key time="0.6" position="0.1 -0.4 0" rotation="0 0 0 1"/>
+    <key time="0.8" position="0.1 -0.4 0" rotation="0.2 0 0 0.98"/>
+  </track>
+  <track bone="lower_leg_r">
+    <key time="0.0" position="0 -0.4 0" rotation="0 0 0 1"/>
+    <key time="0.2" position="0 -0.4 0" rotation="0.25 0 0 0.97"/>
+    <key time="0.4" position="0 -0.4 0" rotation="0 0 0 1"/>
+    <key time="0.6" position="0 -0.4 0" rotation="0.15 0 0 0.99"/>
+    <key time="0.8" position="0 -0.4 0" rotation="0 0 0 1"/>
+  </track>
+
+  <!-- Left leg: forward at 0.4, back at 0.0 (mirror of right, shifted 0.4s) -->
+  <track bone="upper_leg_l">
+    <key time="0.0" position="-0.1 -0.4 0" rotation="-0.2 0 0 0.98"/>
+    <key time="0.2" position="-0.1 -0.4 0" rotation="0 0 0 1"/>
+    <key time="0.4" position="-0.1 -0.4 0" rotation="0.2 0 0 0.98"/>
+    <key time="0.6" position="-0.1 -0.4 0" rotation="0 0 0 1"/>
+    <key time="0.8" position="-0.1 -0.4 0" rotation="-0.2 0 0 0.98"/>
+  </track>
+  <track bone="lower_leg_l">
+    <key time="0.0" position="0 -0.4 0" rotation="0 0 0 1"/>
+    <key time="0.2" position="0 -0.4 0" rotation="0.15 0 0 0.99"/>
+    <key time="0.4" position="0 -0.4 0" rotation="0 0 0 1"/>
+    <key time="0.6" position="0 -0.4 0" rotation="0.25 0 0 0.97"/>
+    <key time="0.8" position="0 -0.4 0" rotation="0 0 0 1"/>
+  </track>
+
+  <!-- Right arm swings opposite to right leg -->
+  <track bone="upper_arm_r">
+    <key time="0.0" position="0 -0.28 0" rotation="-0.15 0 0 0.99"/>
+    <key time="0.2" position="0 -0.28 0" rotation="0 0 0 1"/>
+    <key time="0.4" position="0 -0.28 0" rotation="0.15 0 0 0.99"/>
+    <key time="0.6" position="0 -0.28 0" rotation="0 0 0 1"/>
+    <key time="0.8" position="0 -0.28 0" rotation="-0.15 0 0 0.99"/>
+  </track>
+
+  <!-- Left arm swings opposite to left leg -->
+  <track bone="upper_arm_l">
+    <key time="0.0" position="0 -0.28 0" rotation="0.15 0 0 0.99"/>
+    <key time="0.2" position="0 -0.28 0" rotation="0 0 0 1"/>
+    <key time="0.4" position="0 -0.28 0" rotation="-0.15 0 0 0.99"/>
+    <key time="0.6" position="0 -0.28 0" rotation="0 0 0 1"/>
+    <key time="0.8" position="0 -0.28 0" rotation="0.15 0 0 0.99"/>
+  </track>
+</animation>

@@ -1,0 +1,27 @@
+flowchart TD
+    A[Skeleton XML] -->|load_skeleton| B[Skeleton]
+    C[Animation XML] -->|load_animation_clip| D[AnimationClip]
+
+    B --> E[AnimationPlayer]
+    D --> E
+
+    E -->|evaluate dt| F[Local Transforms]
+    F -->|compute_world_transforms| G[World Transforms mat4]
+
+    H[CollisionSystem] -->|ground_height_at| I[Ground Height]
+    G --> J[Foot IK Solver]
+    I --> J
+
+    J --> K[Adjusted World Transforms]
+    K -->|skeleton_to_renderables| L[RenderEntities]
+
+    M[Attachment Points] --> N[attachment_to_renderables]
+    K --> N
+    N --> O[Gun/Weapon RenderEntities]
+
+    L --> P[Renderer]
+    O --> P
+
+    style A fill:#f9f,stroke:#333
+    style C fill:#f9f,stroke:#333
+    style P fill:#9f9,stroke:#333

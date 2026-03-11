@@ -32,7 +32,7 @@ struct BasicVertex {
     vec3 normal;
 };
 
-enum class PrimitiveType { BOX, SPHERE, GROUND_PLANE };
+enum class PrimitiveType { BOX, SPHERE, GROUND_PLANE, CYLINDER };
 
 class Renderer {
 public:
@@ -55,6 +55,10 @@ public:
     void draw(const mat4& mvp, const vec4& color, PrimitiveType mesh_type);
     void end_frame(VkCommandBuffer cmd);
 
+    /// Recreate extent-dependent resources (depth buffer, framebuffers) after swapchain resize.
+    Result<bool> recreate_for_resize(VkExtent2D new_extent,
+                                      const std::vector<VkImageView>& swapchain_views);
+
     VkRenderPass render_pass() const { return render_pass_; }
 
 private:
@@ -75,6 +79,7 @@ private:
     PrimitiveMesh box_mesh_;
     PrimitiveMesh sphere_mesh_;
     PrimitiveMesh ground_mesh_;
+    PrimitiveMesh cylinder_mesh_;
 
     VkExtent2D extent_{};
 
@@ -97,6 +102,7 @@ private:
     static std::pair<std::vector<BasicVertex>, std::vector<uint32_t>> generate_box();
     static std::pair<std::vector<BasicVertex>, std::vector<uint32_t>> generate_sphere(int segments = 16);
     static std::pair<std::vector<BasicVertex>, std::vector<uint32_t>> generate_ground_plane(float size = 100.0f);
+    static std::pair<std::vector<BasicVertex>, std::vector<uint32_t>> generate_cylinder(int segments = 16);
 };
 
 } // namespace odyssey::vulkan
