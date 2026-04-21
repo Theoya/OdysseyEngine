@@ -1,0 +1,56 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  scout_patrol.actions.xml
+  Serial action sequences for the scout archetype.
+
+  The Nadir shader (showcase/behaviors/scout.nadir) triggers these by writing
+  a non-zero action_request into the BehaviorOutput buffer. The CPU-side
+  ActionSystem reads that field each frame and executes the matching sequence.
+
+  Sequence IDs:
+    1 = patrol_triangle    (loop — walked patrol path with look-arounds)
+    3 = report_contact     (one-shot — face player, bark, signal allies)
+-->
+<actions archetype="scout" version="1">
+
+  <!-- ─────────────────────────────────────────────────────────────────────
+       Sequence 1: patrol_triangle
+       Three-waypoint patrol loop with deliberate pauses for look-around.
+       Triggered by scout.nadir when STATE_PATROL > 2s and patrol_cd ready.
+  ──────────────────────────────────────────────────────────────────────── -->
+  <sequence name="patrol_triangle" id="1" loop="true">
+    <!-- Leg 1 -->
+    <move_to position="-12 0 8" />
+    <wait duration="1.2" />
+    <look_at target="player" />
+    <play_anim id="6" duration="1.0" />   <!-- idle_look_around -->
+    <emit_signal value="0.1" />           <!-- low-urgency ambient ping -->
+
+    <!-- Leg 2 -->
+    <move_to position="0 0 18" />
+    <wait duration="0.8" />
+    <play_anim id="6" duration="0.8" />
+
+    <!-- Leg 3 -->
+    <move_to position="12 0 8" />
+    <wait duration="1.5" />
+    <look_at target="player" />
+    <play_anim id="6" duration="1.2" />
+  </sequence>
+
+  <!-- ─────────────────────────────────────────────────────────────────────
+       Sequence 3: report_contact
+       One-shot: face player, play bark animation, emit comms signal, play
+       voice line. Triggered by scout.nadir when transitioning into
+       STATE_ALERT or STATE_COMBAT (newly_engaged == true).
+  ──────────────────────────────────────────────────────────────────────── -->
+  <sequence name="report_contact" id="3">
+    <look_at target="player" />
+    <play_anim id="5" duration="0.6" />   <!-- point/gesture -->
+    <play_sound name="scout_contact_bark" />
+    <emit_signal value="0.9" />           <!-- high urgency — brings brutes running -->
+    <!-- Record that contact was reported (shader reads memory_1.x if needed later). -->
+    <set_state key="4" value="1.0" />
+  </sequence>
+
+</actions>

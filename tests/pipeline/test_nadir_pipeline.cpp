@@ -163,3 +163,104 @@ TEST(NadirPipelineStandalone, BufferLayoutSingleAgent) {
     EXPECT_EQ(layout.debug_size, 0u);
     EXPECT_EQ(layout.spatial_size, 0u);
 }
+
+// ---------------------------------------------------------------------------
+// Showcase scene AI compile coverage
+//
+// Every behavior shader referenced by demo/showcase/showcase.scene.xml must
+// compile cleanly against the auto-prepended Nadir preamble. The showcase
+// reuses shaders that live in demo/behaviors/; this test also opportunistically
+// scans demo/showcase/behaviors/ if any showcase-specific shaders appear there.
+// ---------------------------------------------------------------------------
+
+namespace {
+
+// Candidate search roots — tests may run from the repo root or from build/.
+static std::vector<std::filesystem::path> candidate_roots_for(
+    const std::string& relative) {
+    return {
+        std::filesystem::path(relative),
+        std::filesystem::path("..") / relative,
+        std::filesystem::path("../..") / relative,
+        std::filesystem::path("T:/OdysseyEngine") / relative,
+    };
+}
+
+static std::filesystem::path find_existing(const std::string& relative) {
+    for (const auto& p : candidate_roots_for(relative)) {
+        std::error_code ec;
+        if (std::filesystem::exists(p, ec)) return p;
+    }
+    return {};
+}
+
+} // namespace
+
+TEST(NadirShowcaseCompile, ShowcaseReferencedShadersCompile) {
+    // Shaders named in demo/showcase/showcase.scene.xml <behavior shader="..."/>.
+    // Resolved against both demo/behaviors/ (shared) and
+    // demo/showcase/behaviors/ (showcase-specific overrides, if any).
+    const std::vector<std::string> referenced_shaders = {
+        "player_input.nadir",
+        "enemy_pack_hunter.nadir",
+        "enemy_ranged.nadir",
+        "multi_arm_gunner.nadir",
+        "civilian_fleeing.nadir",
+    };
+
+    const std::vector<std::string> search_dirs = {
+        "demo/showcase/behaviors",  // preferred (overrides)
+        "demo/behaviors",           // fallback (shared)
+    };
+
+    auto lib_dir = find_existing("behaviors/lib");
+    ASSERT_FALSE(lib_dir.empty()) << "behaviors/lib include dir not found";
+
+    size_t compiled = 0;
+    for (const auto& name : referenced_shaders) {
+        std::filesystem::path found;
+        for (const auto& dir : search_dirs) {
+            auto candidate = find_existing(dir + "/" + name);
+            if (!candidate.empty()) { found = candidate; break; }
+        }
+        ASSERT_FALSE(found.empty())
+            << "Showcase references missing shader: " << name;
+
+        auto bytecode = odyssey::nadir::compile_nadir_file(found, lib_dir);
+        ASSERT_TRUE(bytecode.is_ok())
+            << name << ": read failed: " << bytecode.error();
+        EXPECT_TRUE(bytecode.value().success)
+            << name << ": " << bytecode.value().error_message;
+        EXPECT_GT(bytecode.value().spirv.size(), 0u) << name;
+        ++compiled;
+    }
+    EXPECT_EQ(compiled, referenced_shaders.size());
+}
+
+TEST(NadirShowcaseCompile, AllShadersInBothBehaviorDirsCompile) {
+    // Scan both shader roots and compile every .nadir found. Catches
+    // new shaders added under demo/showcase/behaviors/ without requiring
+    // the test list above to be updated.
+    auto lib_dir = find_existing("behaviors/lib");
+    ASSERT_FALSE(lib_dir.empty());
+
+    std::vector<std::filesystem::path> roots;
+    for (const auto& rel : {"demo/behaviors", "demo/showcase/behaviors"}) {
+        auto p = find_existing(rel);
+        if (!p.empty()) roots.push_back(p);
+    }
+    ASSERT_FALSE(roots.empty()) << "No behavior shader roots found";
+
+    size_t total = 0;
+    for (const auto& root : roots) {
+        auto files = odyssey::nadir::find_nadir_files(root);
+        for (const auto& f : files) {
+            auto bc = odyssey::nadir::compile_nadir_file(f, lib_dir);
+            ASSERT_TRUE(bc.is_ok()) << f.string() << ": " << bc.error();
+            EXPECT_TRUE(bc.value().success)
+                << f.string() << ": " << bc.value().error_message;
+            ++total;
+        }
+    }
+    EXPECT_GT(total, 0u);
+}

@@ -1,0 +1,168 @@
+// ranger.nadir — Showcase archetype: ranged kiter / distance-keeper
+//
+// Design intent:
+//   The ranger is the "pressure" archetype. It doesn't close, it doesn't flee —
+//   it maintains an ideal engagement band (mid-to-long range), strafes laterally
+//   to avoid being a stationary target, and peppers the player with shots at a
+//   predictable cadence the player can learn to avoid.
+//
+// Silhouette:
+//   1. Stops at ~30 units and holds ground, strafing side-to-side.
+//   2. Kites backward (away from player) when the player closes.
+//   3. Fires a visible ranged attack on a steady cadence (~1.5s).
+//
+// Feature coverage demonstrated:
+//   - Bell-curve utility scoring (distance optimality).
+//   - Branchless blend of three movement intents (hold / kite / advance).
+//   - Ranged attack via outputs.attack_target.w > 0 (consumed by projectile spawn).
+//   - debug_pack4: {range_score, kite_score, hold_score, attack_ready}
+
+#include "scoring.glsl"
+#include "steering.glsl"
+#include "spatial.glsl"
+#include "state_machine.glsl"
+#include "blackboard.glsl"
+#include "debug.glsl"
+
+layout(std140, set = 0, binding = 7) uniform Weights {
+    float w_ideal_range;     // 30.0 — center of engagement band (units).
+    float w_band_width;      // 8.0  — half-width of engagement band.
+    float w_kite_gain;       // 1.0  — how hard to back away when too close. ↑ = more shy.
+    float w_advance_gain;    // 0.6  — how hard to close when too far. ↑ = more aggressive ranger.
+    float w_strafe_speed;    // 0.4  — strafe amplitude as fraction of move speed.
+    float w_shot_cooldown;   // 1.5  — seconds between shots. ↑ = slower fire rate.
+    float w_shot_accuracy;   // 0.85 — bell peak for "good shot" score. ↓ = more forgiving misses.
+    float w_hysteresis;      // 0.10 — state stickiness.
+} W;
+
+void main() {
+    uint idx = gl_GlobalInvocationID.x;
+    if (idx >= total_entities) return;
+
+    vec3  pos        = positions[idx].xyz;
+    float hp         = stats[idx].health;
+    float max_hp     = stats[idx].max_health;
+    float spd        = stats[idx].speed;
+    float ammo       = stats[idx].ammo;
+    vec3  player_pos = player_position.xyz;
+    float dt         = delta_time;
+
+    uint  state       = persist[idx].current_state;
+    float state_timer = persist[idx].state_timer + dt;
+    float shot_cd     = cooldown_tick(persist[idx].cooldown_0, dt);
+
+    // ── Considerations ─────────────────────────────────────────────
+    float health_n  = score_health(hp, max_hp);
+    float damage_n  = 1.0 - health_n;
+    float dist      = distance_to(pos, player_pos);
+    float ammo_n    = clamp(ammo / 50.0, 0.0, 1.0);
+
+    // Bell curve over distance — peaks at ideal_range, falls off by band_width.
+    //   dist=ideal → 1.0; dist = ideal±band_width → ~0.61; dist=ideal±2*band → ~0.14
+    float range_score = bell_curve(dist, W.w_ideal_range, W.w_band_width);
+
+    // Out-of-band signals (which direction to correct).
+    float too_close = smooth_threshold(W.w_ideal_range - W.w_band_width - dist, 1.0, 1.0);
+    //                 ^^ large when dist < (ideal - band), i.e. "too close, kite back"
+    float too_far   = smooth_threshold(dist - W.w_ideal_range - W.w_band_width, 1.0, 1.0);
+    //                 ^^ large when dist > (ideal + band), i.e. "too far, advance"
+
+    // Flee if very hurt + very close (can't kite out fast enough).
+    float flee_signal = damage_n * too_close;
+
+    // ── State scoring ──────────────────────────────────────────────
+    //   COMBAT — in band, hold and shoot
+    //   ALERT  — out of band, reposition (kite or advance)
+    //   FLEE   — hurt and cornered
+    float s_combat = range_score * health_n * ammo_n
+                     + hysteresis_bonus(state, STATE_COMBAT, W.w_hysteresis);
+    float s_alert  = (too_close + too_far) * 0.8
+                     + hysteresis_bonus(state, STATE_ALERT, W.w_hysteresis);
+    float s_flee   = flee_signal
+                     + hysteresis_bonus(state, STATE_FLEE, W.w_hysteresis);
+
+    uint new_state = state;
+    float best = score_max3(s_combat, s_alert, s_flee);
+    if (best > 0.20) {
+        if      (s_flee   == best) new_state = STATE_FLEE;
+        else if (s_combat == best) new_state = STATE_COMBAT;
+        else                       new_state = STATE_ALERT;
+    }
+    if (new_state != state) state_timer = 0.0;
+
+    // ── Movement intents ───────────────────────────────────────────
+    vec3 to_player = direction_to(pos, player_pos);
+    vec3 tangent   = normalize(cross(to_player, vec3(0.0, 1.0, 0.0)));
+
+    // Hold: tangential strafe, oscillating per entity (phase offset from idx).
+    //   sin() over world_time gives us a stable cadence that's visually
+    //   readable. Different idx → different phase → the pack doesn't strafe
+    //   in unison (looks orchestrated, not identical).
+    float strafe_phase = world_time * 1.3 + float(idx) * 1.7;
+    vec3 hold_mv = tangent * sin(strafe_phase) * spd * W.w_strafe_speed;
+
+    // Kite: back away while continuing to face player, with some strafe.
+    vec3 kite_mv = -to_player * spd * W.w_kite_gain
+                 + tangent * sin(strafe_phase) * spd * W.w_strafe_speed * 0.5;
+
+    // Advance: close to ideal range (arrive, decelerate inside band).
+    vec3 advance_target = player_pos - to_player * W.w_ideal_range;
+    vec3 advance_mv     = steer_arrive(pos, advance_target, spd * W.w_advance_gain, 6.0);
+
+    // Flee: perpendicular-away vector (kite + tangent escape).
+    vec3 flee_mv = -to_player * spd + tangent * spd * 0.5;
+
+    // ── Blend by which-way-out-of-band we are ──────────────────────
+    // Inside band: use hold_mv. Too close: kite. Too far: advance. Flee state overrides all.
+    vec3 combat_mv = hold_mv * (1.0 - too_close - too_far)
+                   + kite_mv * too_close
+                   + advance_mv * too_far;
+
+    float wC = float(new_state == STATE_COMBAT);
+    float wA = float(new_state == STATE_ALERT);
+    float wF = float(new_state == STATE_FLEE);
+
+    // In ALERT we use the same combat_mv (it's already out-of-band corrective).
+    vec3 move_vec = combat_mv * (wC + wA) + flee_mv * wF;
+
+    float mlen = length(move_vec);
+    if (mlen > spd) move_vec = (move_vec / mlen) * spd;
+
+    // ── Ranged attack ──────────────────────────────────────────────
+    // Fires when: in combat or alert (not flee), shot cooldown ready, has ammo,
+    // and the shot has a high "good shot" score (dist near accuracy peak).
+    float shot_quality = bell_curve(dist / 60.0, W.w_shot_accuracy, 0.2);
+    float attack_w = (wC + wA * 0.5)                  // alert fires half-readily
+                   * float(cooldown_is_ready(shot_cd))
+                   * ammo_n
+                   * shot_quality;
+
+    if (attack_w > 0.5) {
+        shot_cd = cooldown_start(W.w_shot_cooldown);
+    }
+
+    // ── Outputs ────────────────────────────────────────────────────
+    outputs[idx].move_vector     = vec4(move_vec, max(wC, max(wA, wF)));
+    outputs[idx].attack_target   = vec4(player_pos, attack_w);
+    outputs[idx].animation_id    = new_state;
+    outputs[idx].animation_blend = clamp(mlen / max(spd, 0.001), 0.0, 1.0);
+    outputs[idx].sound_event     = (attack_w > 0.5) ? 30u : 0u;       // 30 = ranger_shot
+    outputs[idx].sound_priority  = attack_w;
+    outputs[idx].comms_signal    = 0.0;                               // ranger is silent
+    outputs[idx].comms_urgency   = 0.0;
+    outputs[idx].action_request  = 0u;
+    outputs[idx].action_priority = 0.0;
+
+    // ── Persist ────────────────────────────────────────────────────
+    persist[idx].current_state = new_state;
+    persist[idx].state_timer   = state_timer;
+    persist[idx].cooldown_0    = shot_cd;
+    persist[idx].last_decision = new_state;
+
+    // ── Debug: range quality, kite-pressure, hold-quality, attack-ready.
+    debug_pack4(idx,
+                range_score,
+                too_close,
+                1.0 - too_close - too_far,
+                float(cooldown_is_ready(shot_cd)));
+}

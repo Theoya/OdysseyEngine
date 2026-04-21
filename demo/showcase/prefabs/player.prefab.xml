@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Showcase player
+  ---------------
+  Wires Transform + Capsule collider + RespawnScript. Movement itself stays
+  on PlayerController (shared with the shooter demo) — this prefab is
+  focused on proving the script-attach and respawn-on-death paths.
+
+  phase-4 target block (deferred until schema-add ships):
+
+    <rigidbody mass="70.0"
+               friction="0.80"
+               restitution="0.0"
+               linear_damping="0.40"
+               angular_damping="1.00"
+               kinematic="false"/>
+
+  For now the player remains a capsule against the collision system; when
+  rigidbody ships the capsule becomes the broadphase proxy and the solver
+  takes over ground-contact.
+-->
+<prefab name="showcase_player" version="1">
+  <components>
+    <transform/>
+    <stats health="150" max_health="150" ammo="40" stamina="100" speed="8.0"/>
+    <behavior shader="player_input.nadir"/>
+    <render mesh="demo/materials/player.mesh.xml"
+            material="demo/materials/player.mat.xml"/>
+    <collider type="capsule" radius="0.4" height="1.8"/>
+    <script class="RespawnScript"/>
+  </components>
+</prefab>

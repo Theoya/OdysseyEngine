@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Hostile — NE Courtyard zone.
+  Reference (kb §4): Doom 2016 combat arenas, Akira neon-red sequences,
+  Blade Runner 2049 orange Vegas. Halo "The Library" red alert flashes.
+  Read: alarm, saturated sodium-orange and blood-red, hard shadows, pulsing
+  emissive. No volumetrics (pulse reads in direct light, not in fog).
+  High contrast. Blues are muted into the midtones so the reds sing.
+-->
+<lighting_profile preset="Hostile" version="1">
+  <palette>
+    <primary_kelvin min="1900" max="2400"/>
+    <secondary_kelvin min="3200" max="4000"/>
+    <saturation_max value="0.80"/>
+    <contrast_ratio key_to_fill="6:1" key_to_back="4:1"/>
+  </palette>
+
+  <fog type="exponential" density="0.012" color_kelvin="2200"/>
+  <volumetrics enabled="0" god_rays="0" density_variance="0" steps="0"/>
+
+  <directional_override kelvin="3200" intensity="1.2" direction="0.6 -0.3 -0.5"/>
+
+  <post_fx>
+    <tonemap  curve="aces" exposure="0.90"/>
+    <bloom    threshold="1.2" intensity="0.70" radius="0.40"/>
+    <grade    lift="0.05 0.00 -0.04" gamma="1.02 1.00 0.96" gain="1.10 0.98 0.88"/>
+    <vignette strength="0.22" roundness="1.0"/>
+    <grain    intensity="0.05" response="0.8"/>
+  </post_fx>
+
+  <disallowed_sources>
+    <kelvin_below value="1500"/>
+    <kelvin_above value="6000"/>
+    <band min="5000" max="6000" reason="Hostile refuses neutral daylight — it must read as angry, not informational"/>
+  </disallowed_sources>
+</lighting_profile>

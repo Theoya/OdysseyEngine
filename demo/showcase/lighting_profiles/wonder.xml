@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Wonder — West Chapel zone.
+  Reference (kb §4): Miyazaki forest scenes, "Arrival" first descent,
+  "Shadow of the Colossus" (sky temple), Malick magic-hour.
+  Read: expansive awe, high dynamic range, warm-cool split across pillars.
+  Bloom is gentle (not marketing-blown), god rays through volumetrics carry the
+  register. Grain is restrained; wonder is legible, not dreamy-blurred.
+-->
+<lighting_profile preset="Wonder" version="1">
+  <palette>
+    <primary_kelvin min="5500" max="7000"/>
+    <secondary_kelvin min="2200" max="3200"/>
+    <saturation_max value="0.60"/>
+    <contrast_ratio key_to_fill="3:1" key_to_back="2:1"/>
+  </palette>
+
+  <fog type="exponential_height" density="0.020" color_kelvin="5500" height="10"/>
+  <volumetrics enabled="1" god_rays="1" density_variance="0.50" steps="64"/>
+
+  <directional_override kelvin="6200" intensity="3.5" direction="-0.5 -0.4 -0.3"/>
+
+  <post_fx>
+    <tonemap  curve="aces" exposure="1.05"/>
+    <bloom    threshold="1.0" intensity="0.55" radius="0.55"/>
+    <grade    lift="0.03 0.04 0.05" gamma="1.00 1.00 0.99" gain="1.02 1.01 1.00"/>
+    <vignette strength="0.10" roundness="1.3"/>
+    <grain    intensity="0.03" response="0.7"/>
+  </post_fx>
+
+  <disallowed_sources>
+    <kelvin_below value="1800"/>
+    <kelvin_above value="9000"/>
+    <band min="3800" max="4400" reason="Wonder does not use office-fluorescent mids"/>
+  </disallowed_sources>
+</lighting_profile>

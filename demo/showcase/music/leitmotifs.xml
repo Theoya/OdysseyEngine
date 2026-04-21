@@ -1,0 +1,165 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  leitmotifs.xml — Leitmotif library + archetype bindings for the showcase demo
+  Composer: Marty O'Donnell (reincarnated)
+
+  Each archetype (scout, brute, ranger) is bound to a three-to-five-note cell
+  satisfying the memorability test:
+    1. Distinct intervallic profile (shape you can sing without a piano)
+    2. Rhythmic signature (half the memorability)
+    3. Narrow ambitus (≤ octave — voice-singable)
+
+  Each motif is authored in D (the combat tonic) so it can be stated over the
+  combat bed without retuning. In explore/dread it is transposed to the local
+  tonic via the MusicDirector's runtime transposition.
+
+  Variants per motif: hostile / mournful / distant.
+  Orchestration presets: solo_taiko / choir / strings / solo_flute / muted_horn /
+  low_brass / solo_viola.
+-->
+<leitmotifs version="1" project="odyssey-showcase">
+
+  <!-- ============================================================
+       SCOUT — the swift, searching adversary
+       Shape:  up-M2, up-M2, down-m3, up-P4   (scanning, then a lift)
+       Pitches (in D phrygian, tonic D): D  E  F  D  G
+       Semitones from tonic:             0  2  3  0  5
+       Rhythm: eighth eighth quarter eighth half
+       Character: probing, light-footed, never committed to attack.
+       Ambitus: P5 (7 semitones) — well inside an octave.
+       Memorability test: five notes, shape "question-then-lift".
+       ============================================================ -->
+  <leitmotif id="scout_theme">
+    <pitch_cell notation="semitones_from_tonic">0 2 3 0 5</pitch_cell>
+    <pitch_cell notation="solfege_phrygian">do re me do fa</pitch_cell>
+    <rhythm_cell>E E Q E H</rhythm_cell>
+    <mode>D_phrygian</mode>
+    <tonic>D4</tonic>
+    <ambitus_semis>5</ambitus_semis>
+    <primary_instrument>solo_flute</primary_instrument>
+    <primary_register>soprano</primary_register>
+
+    <variant id="hostile"  transform="diminution"       instrument="solo_flute"
+             dynamic="mf" tempo_mult="1.0"
+             notes="Clean statement at combat tempo; flute on the motif, no accompaniment." />
+    <variant id="mournful" transform="augmentation"     instrument="solo_viola"
+             dynamic="p"  tempo_mult="0.6"
+             notes="Half-speed; viola on G string. Scout is wounded or retreating." />
+    <variant id="distant"  transform="orchestration"    instrument="muted_horn"
+             dynamic="pp" tempo_mult="1.0" reverb="cathedral"
+             notes="Same pitches + rhythm, muted horn + long hall tail. First sight before engagement." />
+  </leitmotif>
+
+  <!-- ============================================================
+       BRUTE — the heavy, inevitable adversary
+       Shape:  down-P4, down-m2, up-m3          (downward weight, then a shoulder)
+       Pitches (in D phrygian, tonic D): D  A3 G#3 B3
+       Semitones from tonic:             0 -5  -6 -3
+       Rhythm: quarter quarter quarter half (4 beats, 2-bar phrase when paired)
+       Character: earthbound, menacing. The descending P4 + m2 cluster is the
+       tritone wrapped in a gesture — diabolus in a fist.
+       Ambitus: P5 (6 semitones).
+       Memorability test: four notes, shape "thud-thud-shift-settle".
+       Intended primary instrument: solo_taiko — the first sight should be FELT.
+       ============================================================ -->
+  <leitmotif id="brute_theme">
+    <pitch_cell notation="semitones_from_tonic">0 -5 -6 -3</pitch_cell>
+    <pitch_cell notation="absolute">D4 A3 Ab3 B3</pitch_cell>
+    <rhythm_cell>Q Q Q H</rhythm_cell>
+    <mode>D_phrygian</mode>
+    <tonic>D4</tonic>
+    <ambitus_semis>6</ambitus_semis>
+    <primary_instrument>solo_taiko</primary_instrument>
+    <primary_register>bass</primary_register>
+
+    <variant id="hostile"  transform="inversion"        instrument="low_brass"
+             dynamic="ff" tempo_mult="1.0"
+             notes="Inverted contour (upward weight), low brass unison. Brute engaged." />
+    <variant id="mournful" transform="augmentation"     instrument="solo_viola"
+             dynamic="p"  tempo_mult="0.6"
+             notes="Half-speed on solo viola; the brute fallen." />
+    <variant id="distant"  transform="orchestration"    instrument="muted_horn"
+             dynamic="pp" tempo_mult="1.0" reverb="cathedral"
+             notes="Muted horn, long tail. Warning of presence, not engagement." />
+
+    <!-- First-sight orchestration: mandated solo_taiko per acceptance checklist.
+         This is the preset the MusicDirector picks when archetype=brute enters
+         the player's awareness for the first time in the scene. -->
+    <first_sight preset="solo_taiko" variant="hostile" />
+  </leitmotif>
+
+  <!-- ============================================================
+       RANGER — the distant, patient adversary
+       Shape:  up-P5, up-m2, down-m3, down-M2   (reach, hesitate, settle)
+       Pitches (in D phrygian, tonic D): D  A  Bb A  G
+       Semitones from tonic:             0  7  8  7  5
+       Rhythm: quarter dotted-quarter eighth quarter quarter
+       Character: a sniper's inhale — the P5 leap is the reach, the m2 lift
+       is the aim, the settle is the line-up.
+       Ambitus: P5 (8 semitones).
+       ============================================================ -->
+  <leitmotif id="ranger_theme">
+    <pitch_cell notation="semitones_from_tonic">0 7 8 7 5</pitch_cell>
+    <pitch_cell notation="solfege_phrygian">do sol le sol fa</pitch_cell>
+    <rhythm_cell>Q D. E Q Q</rhythm_cell>
+    <mode>D_phrygian</mode>
+    <tonic>D4</tonic>
+    <ambitus_semis>8</ambitus_semis>
+    <primary_instrument>low_brass</primary_instrument>
+    <primary_register>tenor</primary_register>
+
+    <variant id="hostile"  transform="diminution"       instrument="low_brass"
+             dynamic="f"  tempo_mult="1.0"
+             notes="Clean statement, low brass, clipped short at the settle — shot fired." />
+    <variant id="mournful" transform="augmentation"     instrument="solo_viola"
+             dynamic="p"  tempo_mult="0.6"
+             notes="Half-speed, viola. Ranger lost the shot." />
+    <variant id="distant"  transform="orchestration"    instrument="muted_horn"
+             dynamic="pp" tempo_mult="1.0" reverb="cathedral"
+             notes="Muted horn on the first three notes only (fragmentation) — we hear the reach, not the shot." />
+  </leitmotif>
+
+  <!-- ============================================================
+       ARCHETYPE BINDINGS
+       Resolved at runtime by MusicDirector::play_leitmotif(theme_id, variant, instrument).
+       ============================================================ -->
+  <archetype_bindings>
+    <binding archetype="scout"  leitmotif="scout_theme"
+             first_sight_variant="distant"  first_sight_instrument="muted_horn"
+             combat_variant="hostile"       combat_instrument="solo_flute"
+             defeat_variant="mournful"      defeat_instrument="solo_viola" />
+
+    <binding archetype="brute"  leitmotif="brute_theme"
+             first_sight_variant="hostile"  first_sight_instrument="solo_taiko"
+             combat_variant="hostile"       combat_instrument="low_brass"
+             defeat_variant="mournful"      defeat_instrument="solo_viola" />
+
+    <binding archetype="ranger" leitmotif="ranger_theme"
+             first_sight_variant="distant"  first_sight_instrument="muted_horn"
+             combat_variant="hostile"       combat_instrument="low_brass"
+             defeat_variant="mournful"      defeat_instrument="solo_viola" />
+  </archetype_bindings>
+
+  <!-- ============================================================
+       ORCHESTRATION PRESETS
+       Named bundles of instrument + gain + reverb + EQ that MusicDirector
+       resolves when a variant requests an instrument.
+       ============================================================ -->
+  <orchestration_presets>
+    <preset id="solo_taiko"   instruments="shime_daiko,chu_daiko"
+            gain_db="-2.0" reverb="room_small"   eq="hi_pass_60" />
+    <preset id="choir"        instruments="SATB_open_vowels"
+            gain_db="-4.0" reverb="cathedral"    eq="air_shelf_plus2" />
+    <preset id="strings"      instruments="tutti_strings"
+            gain_db="-3.0" reverb="hall_medium"  eq="flat" />
+    <preset id="solo_flute"   instruments="concert_flute"
+            gain_db="-3.0" reverb="room_medium"  eq="low_cut_200" />
+    <preset id="muted_horn"   instruments="horn_in_F_muted"
+            gain_db="-5.0" reverb="cathedral"    eq="low_shelf_minus3" />
+    <preset id="low_brass"    instruments="trombone_tuba_unison"
+            gain_db="-2.0" reverb="hall_medium"  eq="low_shelf_plus2" />
+    <preset id="solo_viola"   instruments="viola_G_string"
+            gain_db="-4.0" reverb="hall_small"   eq="mid_scoop_800" />
+  </orchestration_presets>
+
+</leitmotifs>

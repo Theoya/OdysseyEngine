@@ -1,0 +1,6 @@
+- [Charter v0 canonical paths](charter_v0.md) — where the current Vibe Charter lives + framework location
+- [Engineering mandates](mandates.md) — four standing rules that gate every line of code
+- [Council role and veto conditions](council_role.md) — how story-guardian votes and when to veto
+- [User's creative register](user_register.md) — "Fantasy Etherealism Impressionism" + everything-understood
+- [Skill surface](skills.md) — the five story-guardian skills and what each does
+- [Vibe Charter v0 mirror](charter.md) — byte-synchronized mirror of docs/vibe_charter.md for agent-memory access

@@ -47,3 +47,41 @@ cd build && ./Release/odyssey_tests_pipeline.exe # pipeline tests (requires GPU)
 - Pure functions return values; impure wrappers commit to GPU/OS/network
 - XML for all asset formats (scene, prefab, material, mesh)
 - .nadir extension for behavior shaders (valid GLSL compute with auto-prepended preamble)
+
+## Engineering Mandates
+1. **Pure/lean functions by default.** Any function that can be pure, is pure. Side effects isolated to thin I/O boundary wrappers (GPU submit, file I/O, socket send, audio hardware). Pure layer exhaustively unit-tested; impure layer integration-tested.
+2. **Success + failure tests.** Every `Result<T,E>`-returning function gets at least one expected-success test per success path and one expected-failure test per distinct error mode.
+3. **First-principles math.** No opaque formulas. Every math block has a derivation comment. If a team member can't derive it on a whiteboard, it doesn't ship.
+4. **Everything understood.** No third-party library we can't explain line-by-line. No Jolt, no miniaudio/OpenAL/FMOD, PBR is opt-in (Lambertian + Blinn-Phong is default). Each new dep triggers a council vote. pugixml/shaderc/glm/VMA/ImGui grandfathered in.
+
+## Platform Scope
+**Windows only.** No macOS, Linux, or cross-platform abstraction layers until a council vote lifts this. Audio = WASAPI only. File watching = `ReadDirectoryChangesW`. Build pin: `VCToolsVersion=14.42.34433`, MSVC 2022.
+
+## Council Protocol
+Before any non-trivial engine or game design change, invoke `/council` and wait for tally (see `C:\Users\THadfield\.claude\skills\council\SKILL.md`).
+
+**Triggers (auto-invoke):** new subsystem directory under `src/`, new public API in existing subsystem header, schema change (`schemas/*.xsd`, engine.xml shape), new dependency in `vcpkg.json`, render pipeline change (shader semantics, render pass structure, UBO/SSBO layout), netcode protocol change (version bump, tick/send-rate, snapshot field add/remove/reorder, authority-model flip), replacement of an existing library, new enemy archetype / named theme / major visual shader / tone-establishing scene, or any change marked `// DESIGN:` in the request.
+
+**Not triggers:** typo fixes, private impl refactors, test-only changes, doc prose.
+
+**Rule:** 80% weighted consensus required. Below 80% → escalate to user with `escalation_template.md`. Record every decision in `docs/decisions/<YYYY-MM-DD>-<slug>.md`.
+
+### Council weights
+- game-ai-engineer: 2
+- game-asset-engineer: 2
+- game-engine-architect: 2 normally, 3 when topic is physics
+- lighting-mood-architect: 3
+- marty-odonnell-composer: 4 (can force escalation single-handed)
+- netcode-engineer: 2
+- vibe-story-guardian: 2
+- user: 4 (tiebreaker; invoked on escalation)
+
+### Agent-bound skills (invoke when working in the agent's domain)
+See agent cards at `C:\Users\THadfield\.claude\skills\council\agents\*.md` for each agent's bound skill list.
+
+### Memory pointers
+The user's auto-memory at `C:\Users\THadfield\.claude\projects\T--OdysseyEngine\memory\` contains critical project state:
+- `feedback_council_rules.md` — weights, threshold, tally math
+- `project_audio_direction.md` — first-principles mixer, 4-API MusicDirector (Marty-led)
+- `project_engineering_mandates.md` — the four mandates in full
+- `project_platform_scope.md` — Windows-only, WASAPI, ReadDirectoryChangesW

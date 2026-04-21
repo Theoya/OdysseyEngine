@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  gold_leaf.mat.xml
+  High-metallic, low-roughness contrast piece. No maps yet (scalar-only material)
+  to exercise the shader/PBR branches without the texture branch. A later phase
+  can add BC7 albedo + BC5 normal; the current scalar form still validates and
+  round-trips.
+-->
+<material name="gold_leaf" version="1">
+  <shaders>
+    <vertex   src="shaders/pbr.vert"/>
+    <fragment src="shaders/pbr.frag"/>
+  </shaders>
+  <pbr>
+    <!-- Linear-space albedo approximating fine gold leaf F0 tint. -->
+    <albedo    color="1.00 0.78 0.34 1.0"/>
+    <metallic  value="0.95"/>
+    <roughness value="0.12"/>
+  </pbr>
+</material>

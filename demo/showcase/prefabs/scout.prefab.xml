@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  scout.prefab.xml
+  Showcase archetype: flanker / reporter.
+  Links behavior → skeleton → animations → leitmotif binding.
+-->
+<prefab name="scout" version="1">
+  <components>
+    <transform/>
+    <stats health="45" max_health="45" ammo="20" stamina="100" speed="6.5"/>
+    <behavior shader="showcase/behaviors/scout.nadir"
+              actions="showcase/actions/scout_patrol.actions.xml"/>
+    <render mesh="showcase/meshes/scout_body.mesh.xml"
+            material="showcase/materials/scout.mat.xml"/>
+    <skeleton source="demo/fps_humanoid/assets/humanoid.skeleton.xml"/>
+    <animations>
+      <clip state="IDLE"   source="demo/fps_humanoid/assets/idle.anim.xml"/>
+      <clip state="PATROL" source="demo/fps_humanoid/assets/walk_cycle.anim.xml"/>
+      <clip state="ALERT"  source="demo/fps_humanoid/assets/walk_cycle.anim.xml"/>
+      <clip state="COMBAT" source="demo/fps_humanoid/assets/walk_cycle.anim.xml"/>
+      <clip state="FLEE"   source="demo/fps_humanoid/assets/walk_cycle.anim.xml"/>
+    </animations>
+    <collider type="capsule" radius="0.4" height="1.7"/>
+    <ai_state initial="PATROL"/>
+    <!-- Leitmotif binding placeholder — audio agent wires this in compose-theme.
+         When a scout enters the player's awareness, MusicDirector::play_leitmotif
+         is called with theme_id "scout_motif". -->
+    <leitmotif theme="scout_motif" instrument="solo_oboe"/>
+  </components>
+</prefab>

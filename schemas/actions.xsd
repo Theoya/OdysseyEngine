@@ -1,0 +1,116 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  actions.xsd — serial action-sequence schema for Nadir companion files.
+
+  A .actions.xml file declares a set of <sequence> blocks that the CPU-side
+  ActionSystem executes when the GPU compute shader writes action_request into
+  the BehaviorOutput buffer.
+
+  Matches demo/actions/{enemy_pack_hunter,multi_arm_gunner}.actions.xml.
+
+  Shape:
+    <actions archetype="enemy_pack_hunter" version="1">
+      <sequence name="patrol" id="1" loop="true">
+        <move_to position="10 0 5"/>
+        <wait duration="1.5"/>
+        <play_anim id="6" duration="1.5"/>
+        <look_at target="player"/>
+        <play_sound name="enemy_taunt"/>
+        <emit_signal value="0.8"/>
+        <set_state key="0" value="1.0"/>
+        <spawn prefab="loot_drop" offset="0 0.5 0"/>
+        <destroy_self/>
+      </sequence>
+    </actions>
+-->
+<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema"
+           targetNamespace="https://odysseyengine.dev/actions"
+           xmlns:od="https://odysseyengine.dev/actions"
+           elementFormDefault="qualified">
+
+  <xs:element name="actions" type="od:ActionsType"/>
+
+  <xs:complexType name="ActionsType">
+    <xs:sequence>
+      <xs:element name="sequence" type="od:SequenceType" minOccurs="1" maxOccurs="unbounded"/>
+    </xs:sequence>
+    <xs:attribute name="archetype" type="xs:string" use="required"/>
+    <xs:attribute name="version"   type="xs:positiveInteger" use="required"/>
+  </xs:complexType>
+
+  <xs:complexType name="SequenceType">
+    <xs:choice minOccurs="1" maxOccurs="unbounded">
+      <xs:element name="move_to"      type="od:MoveToType"/>
+      <xs:element name="wait"         type="od:WaitType"/>
+      <xs:element name="play_anim"    type="od:PlayAnimType"/>
+      <xs:element name="play_sound"   type="od:PlaySoundType"/>
+      <xs:element name="look_at"      type="od:LookAtType"/>
+      <xs:element name="emit_signal"  type="od:EmitSignalType"/>
+      <xs:element name="set_state"    type="od:SetStateType"/>
+      <xs:element name="spawn"        type="od:SpawnType"/>
+      <xs:element name="destroy_self" type="od:EmptyType"/>
+    </xs:choice>
+    <xs:attribute name="name" type="xs:string"          use="required"/>
+    <xs:attribute name="id"   type="xs:positiveInteger" use="required"/>
+    <xs:attribute name="loop" type="xs:boolean"         default="false"/>
+  </xs:complexType>
+
+  <xs:complexType name="MoveToType">
+    <xs:attribute name="position" type="od:Vec3"  use="required"/>
+    <xs:attribute name="speed"    type="xs:float" default="5.0"/>
+    <xs:attribute name="tolerance" type="xs:float" default="0.5"/>
+  </xs:complexType>
+
+  <xs:complexType name="WaitType">
+    <xs:attribute name="duration" type="od:NonNegativeFloat" use="required"/>
+  </xs:complexType>
+
+  <xs:complexType name="PlayAnimType">
+    <xs:attribute name="id"       type="xs:nonNegativeInteger" use="required"/>
+    <xs:attribute name="duration" type="od:NonNegativeFloat"   use="required"/>
+    <xs:attribute name="loop"     type="xs:boolean"            default="false"/>
+  </xs:complexType>
+
+  <xs:complexType name="PlaySoundType">
+    <xs:attribute name="name"   type="xs:string" use="required"/>
+    <xs:attribute name="volume" type="od:UnitFloat" default="1.0"/>
+  </xs:complexType>
+
+  <xs:complexType name="LookAtType">
+    <xs:attribute name="target" type="xs:string" use="required"/>
+  </xs:complexType>
+
+  <xs:complexType name="EmitSignalType">
+    <xs:attribute name="value" type="od:UnitFloat" use="required"/>
+  </xs:complexType>
+
+  <xs:complexType name="SetStateType">
+    <xs:attribute name="key"   type="xs:nonNegativeInteger" use="required"/>
+    <xs:attribute name="value" type="xs:float"              use="required"/>
+  </xs:complexType>
+
+  <xs:complexType name="SpawnType">
+    <xs:attribute name="prefab" type="xs:string" use="required"/>
+    <xs:attribute name="offset" type="od:Vec3"   default="0 0 0"/>
+  </xs:complexType>
+
+  <xs:complexType name="EmptyType"/>
+
+  <xs:simpleType name="Vec3">
+    <xs:restriction base="xs:string">
+      <xs:pattern value="\s*-?[0-9]*\.?[0-9]+\s+-?[0-9]*\.?[0-9]+\s+-?[0-9]*\.?[0-9]+\s*"/>
+    </xs:restriction>
+  </xs:simpleType>
+  <xs:simpleType name="NonNegativeFloat">
+    <xs:restriction base="xs:float">
+      <xs:minInclusive value="0.0"/>
+    </xs:restriction>
+  </xs:simpleType>
+  <xs:simpleType name="UnitFloat">
+    <xs:restriction base="xs:float">
+      <xs:minInclusive value="0.0"/>
+      <xs:maxInclusive value="1.0"/>
+    </xs:restriction>
+  </xs:simpleType>
+
+</xs:schema>

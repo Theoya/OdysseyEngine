@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  ranger.prefab.xml
+  Showcase archetype: ranged kiter. Maintains engagement band, strafes, fires on cadence.
+-->
+<prefab name="ranger" version="1">
+  <components>
+    <transform/>
+    <stats health="50" max_health="50" ammo="60" stamina="90" speed="5.5"/>
+    <behavior shader="showcase/behaviors/ranger.nadir"/>
+    <render mesh="showcase/meshes/ranger_body.mesh.xml"
+            material="showcase/materials/ranger.mat.xml"/>
+    <skeleton source="demo/fps_humanoid/assets/humanoid.skeleton.xml"/>
+    <animations>
+      <clip state="IDLE"   source="demo/fps_humanoid/assets/idle.anim.xml"/>
+      <clip state="ALERT"  source="demo/fps_humanoid/assets/walk_cycle.anim.xml"/>
+      <clip state="COMBAT" source="demo/fps_humanoid/assets/idle.anim.xml"/>
+      <clip state="FLEE"   source="demo/fps_humanoid/assets/walk_cycle.anim.xml"/>
+    </animations>
+    <collider type="capsule" radius="0.4" height="1.8"/>
+    <ai_state initial="ALERT"/>
+    <leitmotif theme="ranger_motif" instrument="muted_trumpet"/>
+  </components>
+</prefab>

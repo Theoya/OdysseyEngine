@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  pillar.mesh.xml
+  Cylinder primitive with capsule collider. Two LOD tiers to exercise
+  silhouette LOD selection around the arena perimeter.
+-->
+<mesh name="showcase_pillar" version="1">
+  <source format="primitive" path="cylinder"/>
+  <dimensions radius="0.5" height="3.0"/>
+  <lod>
+    <level distance="0"  triangles="48"/>
+    <level distance="30" triangles="16"/>
+    <level distance="80" triangles="8"/>
+  </lod>
+  <collider type="capsule" radius="0.5" height="3.0"/>
+</mesh>

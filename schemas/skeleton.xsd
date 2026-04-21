@@ -1,0 +1,70 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  skeleton.xsd — rigged-skeleton descriptor schema.
+
+  Matches odyssey::anim::Skeleton as authored in demo/fps_humanoid/assets/humanoid.skeleton.xml.
+
+  Shape:
+    <skeleton name="humanoid">
+      <bone name="root"   parent=""     position="x y z" rotation="qx qy qz qw" length="l" radius="r"/>
+      <bone name="spine"  parent="root" .../>
+      ...
+      <attachment name="muzzle" bone="hand_r" position="x y z" rotation="qx qy qz qw"/>
+    </skeleton>
+
+  A bone with parent="" is the root; every other bone MUST reference an existing bone
+  by name.  The XSD enforces the name/IDREF uniqueness; cycle-detection is a loader-
+  level invariant (Result<Skeleton,E> returns Err on cycles).
+-->
+<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema"
+           targetNamespace="https://odysseyengine.dev/skeleton"
+           xmlns:od="https://odysseyengine.dev/skeleton"
+           elementFormDefault="qualified">
+
+  <xs:element name="skeleton" type="od:SkeletonType">
+    <!-- bone names must be unique -->
+    <xs:key name="boneKey">
+      <xs:selector xpath="od:bone"/>
+      <xs:field    xpath="@name"/>
+    </xs:key>
+  </xs:element>
+
+  <xs:complexType name="SkeletonType">
+    <xs:sequence>
+      <xs:element name="bone"       type="od:BoneType"       minOccurs="1" maxOccurs="unbounded"/>
+      <xs:element name="attachment" type="od:AttachmentType" minOccurs="0" maxOccurs="unbounded"/>
+    </xs:sequence>
+    <xs:attribute name="name"    type="xs:string" use="required"/>
+    <xs:attribute name="version" type="xs:positiveInteger" default="1"/>
+  </xs:complexType>
+
+  <xs:complexType name="BoneType">
+    <xs:attribute name="name"     type="xs:string"  use="required"/>
+    <!-- Empty string permitted only for the single root bone.  Loader enforces the "exactly one" rule. -->
+    <xs:attribute name="parent"   type="xs:string"  use="required"/>
+    <xs:attribute name="position" type="od:Vec3"    default="0 0 0"/>
+    <xs:attribute name="rotation" type="od:Quat"    default="0 0 0 1"/>
+    <xs:attribute name="length"   type="xs:float"   default="0.1"/>
+    <xs:attribute name="radius"   type="xs:float"   default="0.025"/>
+  </xs:complexType>
+
+  <xs:complexType name="AttachmentType">
+    <xs:attribute name="name"     type="xs:string" use="required"/>
+    <xs:attribute name="bone"     type="xs:string" use="required"/>
+    <xs:attribute name="position" type="od:Vec3"   default="0 0 0"/>
+    <xs:attribute name="rotation" type="od:Quat"   default="0 0 0 1"/>
+  </xs:complexType>
+
+  <xs:simpleType name="Vec3">
+    <xs:restriction base="xs:string">
+      <xs:pattern value="\s*-?[0-9]*\.?[0-9]+\s+-?[0-9]*\.?[0-9]+\s+-?[0-9]*\.?[0-9]+\s*"/>
+    </xs:restriction>
+  </xs:simpleType>
+
+  <xs:simpleType name="Quat">
+    <xs:restriction base="xs:string">
+      <xs:pattern value="\s*-?[0-9]*\.?[0-9]+\s+-?[0-9]*\.?[0-9]+\s+-?[0-9]*\.?[0-9]+\s+-?[0-9]*\.?[0-9]+\s*"/>
+    </xs:restriction>
+  </xs:simpleType>
+
+</xs:schema>

@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  stone_wall.mat.xml
+  Full-PBR placeholder: albedo + metallic + roughness + normal maps.
+  Exercises every branch of material.xsd (canonical form).
+-->
+<material name="stone_wall" version="1">
+  <shaders>
+    <vertex   src="shaders/pbr.vert"/>
+    <fragment src="shaders/pbr.frag"/>
+  </shaders>
+  <pbr>
+    <albedo    color="0.55 0.53 0.50 1.0"/>
+    <metallic  value="0.02"/>
+    <roughness value="0.85"/>
+  </pbr>
+  <textures>
+    <!-- BC7 for albedo: 8 bpp, best-in-class RGBA quality for authored diffuse. -->
+    <albedo    src="textures/stone_wall_albedo.ktx2"    format="BC7"  colorspace="srgb"   mips="true"/>
+    <!-- BC5 for tangent-space normal: stores XY, reconstruct Z in shader; 8 bpp; no chroma loss. -->
+    <normal    src="textures/stone_wall_normal.ktx2"    format="BC5"  colorspace="linear" mips="true"/>
+    <!-- BC4 for single-channel metallic: 4 bpp. -->
+    <metallic  src="textures/stone_wall_metallic.ktx2"  format="BC4"  colorspace="linear" mips="true"/>
+    <!-- BC4 for single-channel roughness: 4 bpp. -->
+    <roughness src="textures/stone_wall_roughness.ktx2" format="BC4"  colorspace="linear" mips="true"/>
+    <!-- Optional AO / emissive may appear later; schema permits them. -->
+  </textures>
+</material>

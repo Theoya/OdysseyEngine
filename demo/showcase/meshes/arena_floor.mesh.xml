@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  arena_floor.mesh.xml
+  Ground plane for the showcase arena.  Uses the primitive "ground" mesh_type
+  recognized by the existing renderer + mesh loader.  A plane-typed collider
+  provides an O(1) height query for projectiles and pack-hunter pathing.
+-->
+<mesh name="showcase_arena_floor" version="1">
+  <source format="primitive" path="ground"/>
+  <dimensions width="100.0" depth="100.0"/>
+  <lod>
+    <level distance="0" triangles="2"/>
+  </lod>
+  <collider type="plane"/>
+</mesh>

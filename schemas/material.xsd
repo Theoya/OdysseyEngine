@@ -1,0 +1,155 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  material.xsd — PBR material descriptor schema.
+
+  Authored form matches odyssey::assets::MaterialData (src/assets/material_loader.h)
+  and the parser in material_loader.cpp.  Two historical authoring shapes existed;
+  this schema accepts BOTH so all content under demo/ continues to validate:
+
+    1. Canonical (loader-preferred):
+         <material name="..." version="1">
+           <shaders>
+             <vertex   src="shaders/pbr.vert"/>
+             <fragment src="shaders/pbr.frag"/>
+           </shaders>
+           <pbr>
+             <albedo    color="R G B A"/>
+             <metallic  value="0.6"/>
+             <roughness value="0.3"/>
+           </pbr>
+           <textures>
+             <albedo    src="..." format="BC7"   colorspace="srgb"/>
+             <normal    src="..." format="BC5"   colorspace="linear"/>
+             <metallic  src="..." format="BC4"   colorspace="linear"/>
+             <roughness src="..." format="BC4"   colorspace="linear"/>
+           </textures>
+         </material>
+
+    2. Legacy short form (still in demo/materials/*.mat.xml):
+         <material name="..." version="1">
+           <shader vertex="..." fragment="..."/>
+           <properties>
+             <albedo>R G B A</albedo>
+             <metallic>0.6</metallic>
+             <roughness>0.3</roughness>
+           </properties>
+         </material>
+
+  New assets SHOULD prefer form (1) — the loader emits it on round-trip.
+-->
+<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema"
+           targetNamespace="https://odysseyengine.dev/material"
+           xmlns:od="https://odysseyengine.dev/material"
+           elementFormDefault="qualified">
+
+  <xs:element name="material" type="od:MaterialType"/>
+
+  <xs:complexType name="MaterialType">
+    <xs:choice minOccurs="0" maxOccurs="unbounded">
+      <!-- Canonical form -->
+      <xs:element name="shaders"    type="od:ShadersType"/>
+      <xs:element name="pbr"        type="od:PbrType"/>
+      <xs:element name="textures"   type="od:TexturesType"/>
+      <!-- Legacy form -->
+      <xs:element name="shader"     type="od:ShaderShortType"/>
+      <xs:element name="properties" type="od:PropertiesType"/>
+    </xs:choice>
+    <xs:attribute name="name"    type="xs:string"          use="required"/>
+    <xs:attribute name="version" type="xs:positiveInteger" use="required"/>
+  </xs:complexType>
+
+  <!-- Canonical shader pair -->
+  <xs:complexType name="ShadersType">
+    <xs:sequence>
+      <xs:element name="vertex"   type="od:ShaderRefType" minOccurs="1"/>
+      <xs:element name="fragment" type="od:ShaderRefType" minOccurs="1"/>
+    </xs:sequence>
+  </xs:complexType>
+  <xs:complexType name="ShaderRefType">
+    <xs:attribute name="src" type="xs:string" use="required"/>
+  </xs:complexType>
+
+  <!-- Legacy shader shorthand -->
+  <xs:complexType name="ShaderShortType">
+    <xs:attribute name="vertex"   type="xs:string" use="required"/>
+    <xs:attribute name="fragment" type="xs:string" use="required"/>
+  </xs:complexType>
+
+  <!-- Canonical PBR scalar/vector properties -->
+  <xs:complexType name="PbrType">
+    <xs:all>
+      <xs:element name="albedo"    type="od:AlbedoColorType"   minOccurs="0"/>
+      <xs:element name="metallic"  type="od:ScalarValueType"   minOccurs="0"/>
+      <xs:element name="roughness" type="od:ScalarValueType"   minOccurs="0"/>
+      <xs:element name="emissive"  type="od:AlbedoColorType"   minOccurs="0"/>
+      <xs:element name="ao"        type="od:ScalarValueType"   minOccurs="0"/>
+    </xs:all>
+  </xs:complexType>
+  <xs:complexType name="AlbedoColorType">
+    <xs:attribute name="color" type="od:Vec4String" use="required"/>
+  </xs:complexType>
+  <xs:complexType name="ScalarValueType">
+    <xs:attribute name="value" type="od:UnitFloat" use="required"/>
+  </xs:complexType>
+
+  <!-- Legacy <properties> block: text content carries the values -->
+  <xs:complexType name="PropertiesType">
+    <xs:all>
+      <xs:element name="albedo"    type="xs:string" minOccurs="0"/>
+      <xs:element name="metallic"  type="xs:float"  minOccurs="0"/>
+      <xs:element name="roughness" type="xs:float"  minOccurs="0"/>
+    </xs:all>
+  </xs:complexType>
+
+  <!-- Texture map references with explicit compressed-format policy -->
+  <xs:complexType name="TexturesType">
+    <xs:all>
+      <xs:element name="albedo"    type="od:TextureRefType" minOccurs="0"/>
+      <xs:element name="normal"    type="od:TextureRefType" minOccurs="0"/>
+      <xs:element name="metallic"  type="od:TextureRefType" minOccurs="0"/>
+      <xs:element name="roughness" type="od:TextureRefType" minOccurs="0"/>
+      <xs:element name="ao"        type="od:TextureRefType" minOccurs="0"/>
+      <xs:element name="emissive"  type="od:TextureRefType" minOccurs="0"/>
+    </xs:all>
+  </xs:complexType>
+  <xs:complexType name="TextureRefType">
+    <xs:attribute name="src"        type="xs:string"       use="required"/>
+    <xs:attribute name="format"     type="od:TextureFormat" default="BC7"/>
+    <xs:attribute name="colorspace" type="od:ColorSpace"    default="linear"/>
+    <xs:attribute name="mips"       type="xs:boolean"       default="true"/>
+  </xs:complexType>
+
+  <xs:simpleType name="TextureFormat">
+    <xs:restriction base="xs:string">
+      <!-- Desktop BCn set (runtime target).  No RGBA8 at runtime. -->
+      <xs:enumeration value="BC1"/>   <!-- 4 bpp, RGB or RGBA1, cutout only -->
+      <xs:enumeration value="BC3"/>   <!-- 8 bpp, RGBA, legacy -->
+      <xs:enumeration value="BC4"/>   <!-- 4 bpp, single channel (metallic, roughness) -->
+      <xs:enumeration value="BC5"/>   <!-- 8 bpp, two-channel (normal XY, reconstruct Z) -->
+      <xs:enumeration value="BC6H"/>  <!-- 8 bpp, HDR color (env/emissive) -->
+      <xs:enumeration value="BC7"/>   <!-- 8 bpp, high-quality RGBA (albedo) -->
+    </xs:restriction>
+  </xs:simpleType>
+
+  <xs:simpleType name="ColorSpace">
+    <xs:restriction base="xs:string">
+      <xs:enumeration value="srgb"/>
+      <xs:enumeration value="linear"/>
+    </xs:restriction>
+  </xs:simpleType>
+
+  <!-- "R G B A" with each component in [0,1].  Tight but permissive for whitespace. -->
+  <xs:simpleType name="Vec4String">
+    <xs:restriction base="xs:string">
+      <xs:pattern value="\s*[0-9]*\.?[0-9]+\s+[0-9]*\.?[0-9]+\s+[0-9]*\.?[0-9]+\s+[0-9]*\.?[0-9]+\s*"/>
+    </xs:restriction>
+  </xs:simpleType>
+
+  <xs:simpleType name="UnitFloat">
+    <xs:restriction base="xs:float">
+      <xs:minInclusive value="0.0"/>
+      <xs:maxInclusive value="1.0"/>
+    </xs:restriction>
+  </xs:simpleType>
+
+</xs:schema>

@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Dread — South Pit zone.
+  Reference (kb §4): Alien (1979) engine room, Silent Hill 2 fog sections,
+  Dark Souls tomb-of-the-giants, Bloodborne Yharnam at dusk.
+  Read: low-key, cool shadow dominance, a single warm source to anchor the eye.
+  Contrast is high, but the key is dim — the scene is mostly black. Volumetric
+  fog carries weight. Chromatic aberration is subtle; don't make this horror-movie.
+-->
+<lighting_profile preset="Dread" version="1">
+  <palette>
+    <primary_kelvin min="7000" max="10000"/>
+    <secondary_kelvin min="1500" max="2000"/>
+    <saturation_max value="0.35"/>
+    <contrast_ratio key_to_fill="8:1" key_to_back="5:1"/>
+  </palette>
+
+  <fog type="exponential_height" density="0.050" color_kelvin="8000" height="3"/>
+  <volumetrics enabled="1" god_rays="0" density_variance="0.20" steps="32"/>
+
+  <directional_override kelvin="7500" intensity="0.4" direction="0 -1 0"/>
+
+  <post_fx>
+    <tonemap  curve="aces" exposure="0.75"/>
+    <bloom    threshold="1.6" intensity="0.35" radius="0.30"/>
+    <grade    lift="-0.02 -0.01 0.04" gamma="0.96 0.98 1.00" gain="0.92 0.95 1.00"/>
+    <vignette strength="0.35" roundness="0.9"/>
+    <grain    intensity="0.07" response="0.9"/>
+    <chromatic_aberration strength="0.0020"/>
+  </post_fx>
+
+  <disallowed_sources>
+    <kelvin_below value="1500"/>
+    <kelvin_above value="10500"/>
+    <band min="2500" max="6500" reason="Dread refuses neutral/daylight mids — it lives at extremes"/>
+  </disallowed_sources>
+</lighting_profile>
