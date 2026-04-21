@@ -26,6 +26,7 @@ find_package(unofficial-shaderc CONFIG REQUIRED)
 find_package(pugixml CONFIG REQUIRED)
 find_package(CLI11 CONFIG REQUIRED)
 find_package(GTest CONFIG REQUIRED)
+find_package(imgui CONFIG REQUIRED)
 
 # ── Gather sources for the engine library ────────────────────────────────────
 file(GLOB_RECURSE CORE_SOURCES      CONFIGURE_DEPENDS "src/core/*.cpp"      "src/core/*.h")
@@ -37,11 +38,13 @@ file(GLOB_RECURSE SCRIPTING_SOURCES CONFIGURE_DEPENDS "src/scripting/*.cpp" "src
 file(GLOB_RECURSE CLI_SOURCES       CONFIGURE_DEPENDS "src/cli/*.cpp"       "src/cli/*.h")
 file(GLOB_RECURSE APP_SOURCES       CONFIGURE_DEPENDS "src/app/*.cpp"       "src/app/*.h")
 list(FILTER APP_SOURCES EXCLUDE REGEX "odyssey_main\\.cpp$")
+list(FILTER APP_SOURCES EXCLUDE REGEX "odyssey_editor_main\\.cpp$")
 file(GLOB_RECURSE NET_SOURCES       CONFIGURE_DEPENDS "src/net/*.cpp"       "src/net/*.h")
 file(GLOB_RECURSE MCP_SOURCES       CONFIGURE_DEPENDS "src/mcp/*.cpp"       "src/mcp/*.h")
 file(GLOB_RECURSE DEBUG_SOURCES     CONFIGURE_DEPENDS "src/debug/*.cpp"     "src/debug/*.h")
 file(GLOB_RECURSE ANIM_SOURCES      CONFIGURE_DEPENDS "src/animation/*.cpp" "src/animation/*.h")
 file(GLOB_RECURSE PHYSICS_SOURCES   CONFIGURE_DEPENDS "src/physics/*.cpp"   "src/physics/*.h")
+file(GLOB_RECURSE EDITOR_SOURCES    CONFIGURE_DEPENDS "src/editor/*.cpp"    "src/editor/*.h")
 
 set(ENGINE_SOURCES
     ${CORE_SOURCES}
@@ -57,6 +60,7 @@ set(ENGINE_SOURCES
     ${DEBUG_SOURCES}
     ${ANIM_SOURCES}
     ${PHYSICS_SOURCES}
+    ${EDITOR_SOURCES}
 )
 
 # ── Engine static library ───────────────────────────────────────────────────
@@ -77,6 +81,7 @@ target_link_libraries(odyssey_engine
     unofficial::shaderc::shaderc
     pugixml::pugixml
     CLI11::CLI11
+    imgui::imgui
 )
 
 # Windows: link Winsock2 for networking and MCP
@@ -123,6 +128,24 @@ target_link_libraries(odyssey_fps
   PRIVATE
     odyssey_engine
 )
+
+# ── Editor executable ──────────────────────────────────────────────────────
+# Phase 1: a thin front-end that hosts GLFW+Vulkan+ImGui and loads a scene
+# for inspection. Shares the engine's scene/entity/result types but owns
+# its own render loop (the engine's loop will be factored for hosted use
+# in Phase 2; until then, keeping them separate avoids refactoring the
+# renderer's frame graph).
+set(ODYSSEY_EDITOR_MAIN "${CMAKE_CURRENT_SOURCE_DIR}/src/app/odyssey_editor_main.cpp")
+
+add_executable(odyssey_editor ${ODYSSEY_EDITOR_MAIN})
+
+target_link_libraries(odyssey_editor
+  PRIVATE
+    odyssey_engine
+    imgui::imgui
+)
+
+add_dependencies(odyssey_editor copy_engine_assets copy_demo_assets)
 
 # ── Tests ────────────────────────────────────────────────────────────────────
 enable_testing()

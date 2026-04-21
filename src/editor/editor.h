@@ -1,0 +1,101 @@
+#pragma once
+
+// ---------------------------------------------------------------------------
+// editor.h
+// OdysseyEngine Editor — Phase 1.
+//
+// Responsibilities (Phase 1):
+//   - Create a GLFW window + Vulkan context + ImGui overlay.
+//   - Load a showcase-style .scene.xml into an EntityManager.
+//   - Drive three read-only panels: SceneTree, Inspector, Viewport, Log.
+//   - Provide Mode (Play/Edit/Simulate) as editor state — logic hooks are
+//     stubbed for Phase 2.
+//
+// Phase 2+ (NOT this task):
+//   - Writable inspector fields (round-trip serialize).
+//   - Live viewport image from PostProcessor offscreen view via
+//     ImGui_ImplVulkan_AddTexture.
+//   - Engine in-process hosting with mode pause semantics.
+// ---------------------------------------------------------------------------
+
+#include "core/result.h"
+#include "editor/mode_enum.h"
+#include "scene/entity_manager.h"
+
+#include <filesystem>
+#include <memory>
+#include <string>
+#include <vector>
+
+struct GLFWwindow;
+
+namespace odyssey::editor {
+
+class Panel;
+
+// Editor state — the single pure-data struct passed to every Panel::draw.
+// Anything that's worth saving to an editor-layout file lives here.
+struct EditorState {
+    // Selection
+    EntityID selected_entity = INVALID_ENTITY;
+
+    // Execution mode
+    Mode mode = Mode::Edit;
+
+    // Loaded scene (owned by Editor; panels hold a reference)
+    scene::EntityManager* entities = nullptr;
+    std::filesystem::path scene_path;
+
+    // Coarse dirty flag (set when mode changes or selection changes —
+    // used by future Phase 2 persistence hooks).
+    bool dirty = false;
+
+    // Status-bar text (last log line, load result, etc.)
+    std::string status_line;
+};
+
+// Pure helper: given an entity pointer, produce a stable display label.
+// Exposed here so unit tests can exercise the label format.
+std::string entity_display_label(const scene::Entity& entity);
+
+// Pure helper: returns true if a given archetype name should be grouped
+// under the "Static Geometry" header in the scene tree.
+bool is_static_archetype(const std::string& archetype);
+
+class Editor {
+public:
+    Editor();
+    ~Editor();
+
+    Editor(const Editor&) = delete;
+    Editor& operator=(const Editor&) = delete;
+
+    // Initialize window, Vulkan, ImGui. Loads the given scene file if
+    // present (scene load errors are logged but not fatal — per the
+    // Phase 1 spec, the editor should still open).
+    Result<bool> initialize(const std::filesystem::path& scene_path);
+
+    // Run the main loop until the user closes the window.
+    void run();
+
+    // Tear down in reverse initialization order.
+    void shutdown();
+
+    // Impl is declared public so the .cpp's free-function Vulkan helpers
+    // can accept `Editor::Impl&` directly. Nothing else references it.
+    struct Impl;
+
+private:
+    std::unique_ptr<Impl> impl_;
+
+    std::vector<std::unique_ptr<Panel>> panels_;
+    EditorState state_;
+
+    void build_panels();
+    void draw_frame(float delta_time);
+    void draw_menu_bar();
+    void draw_mode_toolbar();
+    void draw_status_bar();
+};
+
+} // namespace odyssey::editor
