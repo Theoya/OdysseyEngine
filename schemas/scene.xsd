@@ -10,15 +10,26 @@
   <xs:complexType name="SceneType">
     <xs:sequence>
       <xs:element name="world"  type="od:WorldType"  minOccurs="0" maxOccurs="1"/>
-      <xs:element name="entity" type="od:EntityType" minOccurs="0" maxOccurs="unbounded"/>
-      <xs:element name="spawn_region" type="od:SpawnRegionType" minOccurs="0" maxOccurs="unbounded"/>
+      <xs:choice minOccurs="0" maxOccurs="unbounded">
+        <xs:element name="entity"       type="od:EntityType"      />
+        <xs:element name="spawn_region" type="od:SpawnRegionType" />
+      </xs:choice>
     </xs:sequence>
-    <xs:attribute name="name"    type="xs:string"       use="required"/>
+    <xs:attribute name="name"    type="xs:string"          use="required"/>
     <xs:attribute name="version" type="xs:positiveInteger" use="required"/>
+    <!-- Unknown scene-root attrs (e.g. lighting_profile, audio_bank) captured
+         by the loader's preserve-unknowns path. -->
+    <xs:anyAttribute processContents="skip"/>
   </xs:complexType>
 
-  <!-- World settings -->
+  <!-- World settings: attributes or child elements both permitted. Demo
+       showcase uses <time_scale>…</time_scale> child-text form; other scenes
+       may use attributes. The loader accepts either. -->
   <xs:complexType name="WorldType">
+    <xs:sequence>
+      <xs:element name="time_scale" type="xs:float" minOccurs="0"/>
+      <xs:element name="gravity"    type="xs:string" minOccurs="0"/>
+    </xs:sequence>
     <xs:attribute name="time_scale" type="xs:float" default="1.0"/>
     <xs:attribute name="gravity"    type="xs:float" default="-9.81"/>
   </xs:complexType>
@@ -26,16 +37,24 @@
   <!-- Entity -->
   <xs:complexType name="EntityType">
     <xs:sequence>
-      <xs:element name="transform" type="od:TransformType" minOccurs="0" maxOccurs="1"/>
-      <xs:element name="stats"     type="od:StatsType"     minOccurs="0" maxOccurs="1"/>
-      <xs:element name="behavior"  type="od:BehaviorType"  minOccurs="0" maxOccurs="1"/>
-      <xs:element name="mesh"      type="od:MeshType"      minOccurs="0" maxOccurs="1"/>
-      <xs:element name="script"    type="od:ScriptType"    minOccurs="0" maxOccurs="unbounded"/>
-      <xs:element name="pack"      type="od:PackType"      minOccurs="0" maxOccurs="1"/>
+      <xs:element name="transform"    type="od:TransformType"    minOccurs="0" maxOccurs="1"/>
+      <xs:element name="stats"        type="od:StatsType"        minOccurs="0" maxOccurs="1"/>
+      <xs:element name="behavior"     type="od:BehaviorType"     minOccurs="0" maxOccurs="1"/>
+      <xs:element name="mesh"         type="od:MeshType"         minOccurs="0" maxOccurs="1"/>
+      <xs:element name="material"     type="od:MaterialType"     minOccurs="0" maxOccurs="1"/>
+      <xs:element name="script"       type="od:ScriptType"       minOccurs="0" maxOccurs="unbounded"/>
+      <xs:element name="pack"         type="od:PackType"         minOccurs="0" maxOccurs="1"/>
+      <!-- spawn_region is also allowed as a CHILD of entity in shooter_arena
+           shape (batch-spawn metadata scoped to one entity descriptor). -->
+      <xs:element name="spawn_region" type="od:SpawnRegionType"  minOccurs="0" maxOccurs="1"/>
     </xs:sequence>
+    <!-- anyAttribute: the loader's "preserve unknowns" path captures attributes
+         that are not in the known set (e.g. light_type, kelvin, material_override
+         on <entity>) so authoring tooling can add them without a schema bump. -->
     <xs:attribute name="id"        type="xs:string"             use="required"/>
     <xs:attribute name="archetype" type="xs:string"             use="required"/>
     <xs:attribute name="count"     type="xs:positiveInteger"    default="1"/>
+    <xs:anyAttribute processContents="skip"/>
   </xs:complexType>
 
   <!-- Transform -->
@@ -52,6 +71,34 @@
     <xs:attribute name="speed"      type="xs:float" default="5.0"/>
     <xs:attribute name="ammo"       type="xs:float" default="0.0"/>
     <xs:attribute name="stamina"    type="xs:float" default="100.0"/>
+    <xs:attribute name="voice_range" type="od:VoiceRangeType" default="25.0">
+      <xs:annotation>
+        <xs:documentation xml:lang="en">
+          Proximity-voice audibility radius in meters. Default 25.0m = d_max
+          from the inverse-amplitude attenuation curve authored in
+          docs/design/proximity_chat_audio.md. Authored-time bound is [0, 50];
+          the server additionally hard-clamps ingress to 50m at runtime (see
+          docs/decisions/2026-04-20-proximity-voice-chat.md, netcode condition
+          "anti-cheat hard-clamp"). Loaders reject negative, NaN, and
+          &gt; 50 values at authored time; serializer omits this attribute
+          when it equals the default so unmutated scenes round-trip bytewise.
+        </xs:documentation>
+      </xs:annotation>
+    </xs:attribute>
+  </xs:complexType>
+
+  <!-- Voice range: [0, 50] meters. Ratified in
+       docs/decisions/2026-04-20-proximity-voice-chat.md. -->
+  <xs:simpleType name="VoiceRangeType">
+    <xs:restriction base="xs:float">
+      <xs:minInclusive value="0.0"/>
+      <xs:maxInclusive value="50.0"/>
+    </xs:restriction>
+  </xs:simpleType>
+
+  <!-- Material reference (used by demo showcase meshes). -->
+  <xs:complexType name="MaterialType">
+    <xs:attribute name="src" type="xs:string" use="required"/>
   </xs:complexType>
 
   <!-- Behavior (Nadir compute shader) -->

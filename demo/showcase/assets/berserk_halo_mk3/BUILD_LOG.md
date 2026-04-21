@@ -66,3 +66,55 @@ Single-pass build in `build_berserk_halo.py`; one Blender run produced everythin
 - `berserk_halo.mesh.xml` replaces the old placeholder. Points at the real OBJ. LODs 10720→4500→1500. Capsule collider 0.55r × 2.10h.
 - Note: the forward renderer's RenderEntity::mesh_type enum only knows {box,sphere,ground,cylinder} — there is NO OBJ-rendered mesh_type wired into the renderer yet. Adding one is a council-triggering renderer change (new vertex buffer class path). This descriptor is valid and engine-loadable via `mesh_loader::load_obj_geometry`, but runtime rendering in fps_humanoid will be via bone-parented primitives (see integration step).
 
+### [2026-04-21 00:44] Heavy walk animation authored
+- `berserk_halo_walk.anim.xml` — 14 tracks, 1.40s duration, looping.
+- Design vs stock walk_cycle (0.8s, light): 1.75x slower cadence, 4cm root dip on plant frames (vs 2cm), permanent +3deg hunch on chest/spine, -1deg head forward tilt, deep lower_leg lobster bend at mid-swing, HALVED arm swing amplitude (0.08 not 0.15) for armor restriction read, 2deg shoulder dip counter-rotate per step.
+- Validated: all 14 bone names resolve against humanoid.skeleton.xml; all keyframes monotonic and ≤ duration.
+
+### [2026-04-21 00:50] Demo integration — BerserkHaloCharacter class
+- New files: `demo/fps_humanoid/berserk_halo_character.{h,cpp}` — picked up automatically by `file(GLOB_RECURSE "demo/fps_humanoid/*.cpp")` in CMakeLists.
+- Bone-parented primitive rendering: each armor piece is a `{bone, local_offset, local_rot, scale, mesh_type}` placed into world space as `bone_world_transform * translate(offset) * rotate(rot)`. Scales are authored fixed.
+- 72 armor pieces (all claws expand into 5 per side at runtime → hence 72 vs the 63 joined-mesh Blender count).
+- Wired one enemy (index 0, "mini-boss") to use the armor — spawns at closer 22m radius with 180 HP. Other 7 enemies remain stock stick-figures.
+- Damage flash: HSV-lerped red overlay on armor pieces scaled by missing-HP * sin(t*10) pulse.
+
+### [2026-04-21 00:51] Pre-existing engine blocker FIXED
+- Discovered `src/core/result.h` was ambiguous when `T==E` (e.g. `Result<std::string>` where E defaults to std::string). Both `std::get<T>(variant)` and `variant(T)` constructor were ambiguous. This was BLOCKING odyssey_engine, odyssey_fps, and the whole Editor build.
+- Surgical patch: swap type-based `std::get<T>/<E>` → index-based `std::get<0>/<1>`; use `std::in_place_index<0/1>` in the two private constructors. Semantically identical, but unambiguous for T==E.
+- Net effect: unblocks the build for everyone. All 162 unit tests still pass.
+
+### [2026-04-21 00:52] BUILD VERIFIED — odyssey_fps runs with the Berserk-Halo
+- `cmake --build build --config Release --target odyssey_fps` → `odyssey_fps.exe` (5.4 MB) produced clean.
+- Runtime log confirms:
+  - `Loaded animation 'berserk_halo_walk': duration=1.40s, 14 tracks, looping=true`
+  - `BerserkHaloCharacter: initialized with 19 bones, 72 armor pieces`
+  - `FPSHumanoidGame: initialized with 8 humanoid enemies` (1 Berserk + 7 stock)
+- Vulkan stack brings up the frame graph, no crashes in the first seconds.
+- 162/162 unit tests pass.
+
+### [2026-04-21 00:52] Hero render baked
+- `berserk_halo_hero.png` (1920x1080, 1.5 MB) via Eevee, 64 TAA samples, Filmic/High-Contrast view transform.
+- Render script `render_hero_shot.py`. Key light warm-sun upper-right, hard-white rim spot from back-left, cool blue area fill from front-left. Black background, near-black armor, glowing yellow-white visor.
+- Gotcha: the authoring .blend positions the figure along +Y (for engine export with `axis_up=Y`), but Blender's native world convention is +Z up — so the renderer sees the figure horizontal. Script rotates the `berserk_halo_root` empty 90deg about X at render time to stand it up in +Z world, then all camera/light positions are in Blender-world +Z-up.
+- Silhouette reads: forward-swept horns, bright visor slit, layered chevron chest, pauldron stack, ribbed abdomen, wedged boots. All four keywords (BRUTAL / ANGULAR / HEAVY / SCARRED) readable.
+
+### Deliverables inventory
+1. `berserk_halo_master.blend` (1.2 MB) — authoring file, modifiers non-destructive
+2. `berserk_halo.obj` (679 KB) + `berserk_halo.mtl` — baked game export
+3. `berserk_halo.mesh.xml` — engine-loadable descriptor
+4. `berserk_halo.mat.xml` + `berserk_halo_visor.mat.xml` — monochrome matte armor + emissive visor
+5. `berserk_halo_walk.anim.xml` — heavy walk cycle
+6. `berserk_halo_hero.png` — 1080p hero render
+7. `build_berserk_halo.py` + `render_hero_shot.py` — reproducible pipeline scripts
+8. `tri_counts.txt` — per-part tri breakdown (10,720 total across 63 named objects)
+9. `demo/fps_humanoid/berserk_halo_character.{h,cpp}` — runtime bone-parented primitive renderer
+10. `demo/fps_humanoid/fps_game.{h,cpp}` — updated to spawn one Berserk-Halo enemy as mini-boss
+
+### Outstanding / future work
+- Skinned-mesh renderer path (would let the OBJ be rendered directly instead of the primitive decomposition). Currently gated by a council vote — new `mesh_type` or a new `src/vulkan/` subpath for OBJ-backed entities.
+- UV unwrap + BC7/BC5 baked textures for when the BCn baker ships (tips doc §5).
+- Scar pass — knife-project panel lines and deeper notches. ~10% budget headroom reserved.
+- Additional animations: heavy idle (breathing + subtle weapon-ready pose), taunt, death ragdoll.
+- Council ratification for the mini-boss inclusion in the default demo (tone-establishing asset — vibe-story-guardian + Marty can single-handedly escalate).
+
+

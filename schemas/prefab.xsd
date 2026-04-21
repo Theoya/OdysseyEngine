@@ -42,7 +42,31 @@
     <xs:attribute name="speed"      type="xs:float" default="5.0"/>
     <xs:attribute name="ammo"       type="xs:float" default="0.0"/>
     <xs:attribute name="stamina"    type="xs:float" default="100.0"/>
+    <xs:attribute name="voice_range" type="od:VoiceRangeType" default="25.0">
+      <xs:annotation>
+        <xs:documentation xml:lang="en">
+          Proximity-voice audibility radius in meters for instances spawned
+          from this prefab. Default 25.0m = d_max from the inverse-amplitude
+          attenuation curve authored in docs/design/proximity_chat_audio.md.
+          Authored-time bound is [0, 50]; the server additionally hard-clamps
+          ingress to 50m at runtime (see
+          docs/decisions/2026-04-20-proximity-voice-chat.md, netcode condition
+          "anti-cheat hard-clamp"). Loaders reject negative, NaN, and
+          &gt; 50 values at authored time; serializer omits this attribute
+          when it equals the default so unmutated prefabs round-trip bytewise.
+        </xs:documentation>
+      </xs:annotation>
+    </xs:attribute>
   </xs:complexType>
+
+  <!-- Voice range: [0, 50] meters. Ratified in
+       docs/decisions/2026-04-20-proximity-voice-chat.md. -->
+  <xs:simpleType name="VoiceRangeType">
+    <xs:restriction base="xs:float">
+      <xs:minInclusive value="0.0"/>
+      <xs:maxInclusive value="50.0"/>
+    </xs:restriction>
+  </xs:simpleType>
 
   <!-- Behavior (Nadir compute shader) -->
   <xs:complexType name="BehaviorType">

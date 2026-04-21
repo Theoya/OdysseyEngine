@@ -324,3 +324,122 @@ TEST(SceneSerializer, InvalidXmlReturnsError) {
     auto r = parse_scene_xml(junk);
     EXPECT_TRUE(r.is_err());
 }
+
+// ---------------------------------------------------------------------------
+// voice_range round-trip coverage.
+//
+// Contract (docs/decisions/2026-04-20-proximity-voice-chat.md):
+//   * A scene that authored voice_range=X round-trips byte-identical.
+//   * A scene that did NOT author voice_range never grows a phantom
+//     voice_range="25" on the way out (byte-identical round-trip).
+//   * A mutated SceneData with voice_range != 25 must emit the attribute on
+//     the reconstruction path; with voice_range == 25 must omit it.
+// ---------------------------------------------------------------------------
+
+namespace {
+
+std::string build_voice_range_scene(const char* voice_range_literal) {
+    // minimal scene, single entity, <stats> optionally carries voice_range.
+    std::ostringstream s;
+    s << "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n"
+      << "<scene name=\"vr\" version=\"1\">\n"
+      << "  <entity id=\"p\" archetype=\"player\">\n"
+      << "    <stats health=\"100\" max_health=\"100\"";
+    if (voice_range_literal) {
+        s << " voice_range=\"" << voice_range_literal << "\"";
+    }
+    s << "/>\n"
+      << "  </entity>\n"
+      << "</scene>\n";
+    return s.str();
+}
+
+} // namespace
+
+TEST(SceneSerializer, VoiceRangeAuthoredRoundTripsByteIdentical) {
+    // The preserved_source echo path means a scene with voice_range=10
+    // serializes back exactly as loaded, bytes intact.
+    std::string src = build_voice_range_scene("10");
+    auto loaded = parse_scene_xml(src);
+    ASSERT_TRUE(loaded.is_ok()) << loaded.error();
+    auto scene = std::move(loaded).value();
+    // parse_scene_xml does not populate preserved_source (load_scene_file
+    // does). Simulate the file-load round-trip by stamping it ourselves.
+    scene.preserved_source = src;
+    EXPECT_FALSE(scene.mutated);
+    EXPECT_FLOAT_EQ(scene.entities.at(0).voice_range, 10.0f);
+
+    auto ser = serialize_scene_to_string(scene);
+    ASSERT_TRUE(ser.is_ok()) << ser.error();
+    EXPECT_EQ(std::move(ser).value(), src);
+}
+
+TEST(SceneSerializer, VoiceRangeOmittedRoundTripsWithoutPhantomAttribute) {
+    // The anti-regression test: adding voice_range must NOT cause scenes
+    // that never authored the attribute to acquire voice_range="25" on
+    // write-back. Verified both via the echo path and the reconstruction
+    // path (force_reconstruct + mutated simulation).
+    std::string src = build_voice_range_scene(nullptr);
+    auto loaded = parse_scene_xml(src);
+    ASSERT_TRUE(loaded.is_ok());
+    auto scene = std::move(loaded).value();
+    scene.preserved_source = src;
+    EXPECT_FLOAT_EQ(scene.entities.at(0).voice_range, 25.0f);
+
+    // Echo path: byte-identical.
+    auto echo = serialize_scene_to_string(scene);
+    ASSERT_TRUE(echo.is_ok());
+    EXPECT_EQ(std::move(echo).value(), src);
+
+    // Reconstruction path: voice_range must still not appear.
+    SerializeOptions opts;
+    opts.force_reconstruct = true;
+    auto rec = serialize_scene_to_string(scene, opts);
+    ASSERT_TRUE(rec.is_ok());
+    std::string out = std::move(rec).value();
+    EXPECT_EQ(out.find("voice_range"), std::string::npos)
+        << "phantom voice_range attribute appeared on reconstruction path:\n"
+        << out;
+}
+
+TEST(SceneSerializer, MutatedVoiceRangeEmitsAttributeOnReconstruction) {
+    // Start from an unauthored scene, flip voice_range on the in-memory
+    // SceneData, then reserialize: the attribute MUST appear.
+    std::string src = build_voice_range_scene(nullptr);
+    auto loaded = parse_scene_xml(src);
+    ASSERT_TRUE(loaded.is_ok());
+    auto scene = std::move(loaded).value();
+
+    scene.entities.at(0).voice_range = 12.0f;
+    scene.mutated = true;
+
+    auto ser = serialize_scene_to_string(scene);
+    ASSERT_TRUE(ser.is_ok());
+    std::string out = std::move(ser).value();
+    EXPECT_NE(out.find("voice_range=\"12\""), std::string::npos)
+        << "voice_range should be emitted on the reconstruction path:\n"
+        << out;
+
+    // And the round-trip of the emitted value must parse back identically.
+    auto reparsed = parse_scene_xml(out);
+    ASSERT_TRUE(reparsed.is_ok()) << reparsed.error();
+    EXPECT_FLOAT_EQ(reparsed.value().entities.at(0).voice_range, 12.0f);
+}
+
+TEST(SceneSerializer, MutatedVoiceRangeBackToDefaultOmitsAttribute) {
+    // Symmetric case: flip voice_range from some non-default back to the
+    // documented 25.0 default — the reconstruction path must omit it again.
+    std::string src = build_voice_range_scene("10");
+    auto loaded = parse_scene_xml(src);
+    ASSERT_TRUE(loaded.is_ok());
+    auto scene = std::move(loaded).value();
+
+    scene.entities.at(0).voice_range = 25.0f;
+    scene.mutated = true;
+
+    auto ser = serialize_scene_to_string(scene);
+    ASSERT_TRUE(ser.is_ok());
+    std::string out = std::move(ser).value();
+    EXPECT_EQ(out.find("voice_range"), std::string::npos)
+        << "voice_range default should be omitted, not emitted:\n" << out;
+}

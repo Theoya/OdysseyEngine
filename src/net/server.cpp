@@ -1,6 +1,8 @@
 #include "net/server.h"
+#include "audio/voice/voice_frame.h"
 #include <spdlog/spdlog.h>
 #include <algorithm>
+#include <cmath>
 #include <cstring>
 
 namespace odyssey::net {
@@ -169,8 +171,125 @@ void Server::process_packet(const Address& sender, const uint8_t* data, size_t s
             socket_.send_to(sender, writer.data(), writer.size());
             break;
         }
+        case PacketType::VOICE_FRAME: {
+            // Voice relay is its own code path — extracted for unit testing
+            // (tests call handle_voice_frame directly with a capturing send fn).
+            handle_voice_frame(sender, data, size);
+            break;
+        }
         default:
             break;
+    }
+}
+
+void Server::voice_send(const Address& dst, const uint8_t* data, size_t size) {
+    if (voice_send_fn_) {
+        voice_send_fn_(dst, data, size);
+    } else {
+        socket_.send_to(dst, data, size);
+    }
+}
+
+void Server::set_client_position(size_t slot_index, const vec3& pos) {
+    if (slot_index < clients_.size()) clients_[slot_index].voice.position = pos;
+}
+
+void Server::set_client_voice_range(size_t slot_index, float range_m) {
+    if (slot_index < clients_.size()) {
+        // Hard clamp on write, not just on relay. Defence in depth: even if a
+        // bug somewhere sets the value above the cap, the ingress path can't
+        // trust the field anyway. Council: "netcode — anti-cheat hard-clamp".
+        clients_[slot_index].voice.voice_range =
+            std::min(std::max(range_m, 0.0f), VOICE_RANGE_MAX_METERS);
+    }
+}
+
+void Server::handle_voice_frame(const Address& sender,
+                                const uint8_t* data,
+                                size_t size) {
+    // 1. AUTHED SENDER LOOKUP. Unknown senders are dropped — a v2 VOICE_FRAME
+    //    from a non-connected address is either stray junk or a probe; either
+    //    way, don't relay. This also prevents amplification attacks (attacker
+    //    spoofing source IP to make the server spam a victim).
+    ClientSlot* sender_slot = find_client(sender);
+    if (!sender_slot || !sender_slot->connected) {
+        spdlog::debug("Voice frame from non-connected {} — dropped", sender.to_string());
+        return;
+    }
+
+    // 2. PARSE + VALIDATE. deserialize_voice_frame enforces protocol id,
+    //    packet type, size ceiling, and reserved-flag bits. Any failure =
+    //    silent drop (these are unreliable frames; no NACK).
+    auto parsed = odyssey::audio::voice::deserialize_voice_frame(data, size);
+    if (parsed.is_err()) {
+        spdlog::debug("Voice frame from {} failed parse: {}",
+                      sender.to_string(),
+                      odyssey::audio::voice::to_string(parsed.error()));
+        return;
+    }
+    auto vf = std::move(parsed).value();
+
+    // 3. REPLAY / STALE-SEQUENCE GUARD. Drop frames more than 32 units old;
+    //    wrap-aware. Matches design doc §8.
+    const uint16_t seq = vf.voice.sequence;
+    if (sender_slot->voice.has_voice_sequence) {
+        const int16_t delta =
+            static_cast<int16_t>(seq - sender_slot->voice.last_voice_sequence);
+        if (delta <= 0 && delta > -32) {
+            // Late or duplicate — drop but don't advance the window.
+            return;
+        }
+        if (delta <= -32) {
+            // Way too old: replay or a very confused peer. Drop.
+            return;
+        }
+    }
+    sender_slot->voice.last_voice_sequence = seq;
+    sender_slot->voice.has_voice_sequence = true;
+
+    // 4. SILENCE SUPPRESSION. Zero-length payload would encode to nothing
+    //    useful, and END_OF_TALK is a local-client hint (jitter flush) that
+    //    could be delivered via a lightweight marker — but per design doc we
+    //    explicitly DO NOT relay these, to save bandwidth. Listeners use a
+    //    silence-timeout disarm instead. Council condition "silence
+    //    suppression" + "END_OF_TALK not relayed" in the test matrix.
+    const bool end_of_talk =
+        (vf.voice.flags & odyssey::net::voice_flags::END_OF_TALK) != 0;
+    if (vf.opus_payload.empty() || end_of_talk) {
+        return;
+    }
+
+    // 5. ANTI-SPOOF REBIND. The CLIENT's speaker_entity_id field is ignored;
+    //    we overwrite with the authed sender's player_entity. This is the
+    //    keystone of the voice-impersonation mitigation. NEVER TRUST THE
+    //    CLIENT-SUPPLIED speaker_entity_id.
+    vf.voice.speaker_entity_id = sender_slot->player_entity;
+
+    // 6. CLAMP voice_range on ingress. A compromised client cannot widen its
+    //    own voice_range stat to broadcast globally. Hard cap = 50 m.
+    const float clamped_range = std::min(
+        std::max(sender_slot->voice.voice_range, 0.0f),
+        VOICE_RANGE_MAX_METERS);
+
+    // 7. RE-SERIALIZE with the rewritten speaker_entity_id. The Opus payload
+    //    bytes are reused verbatim — no transcode, no repack. This preserves
+    //    the end-to-end "bits the speaker encoded are the bits the listener
+    //    decodes" invariant.
+    const auto relay_bytes = odyssey::audio::voice::serialize_voice_frame(vf);
+
+    // 8. FAN OUT with per-listener interest filter.
+    //    d = ||speaker.pos - listener.pos||. Listener is in range iff d <= R.
+    const vec3 speaker_pos = sender_slot->voice.position;
+    for (auto& listener : clients_) {
+        if (!listener.connected) continue;
+        if (&listener == sender_slot) continue; // never echo to self
+
+        const vec3 d = listener.voice.position - speaker_pos;
+        const float dist2 = d.x * d.x + d.y * d.y + d.z * d.z;
+        const float r2 = clamped_range * clamped_range;
+        if (dist2 > r2) continue; // out of range
+
+        voice_send(listener.address, relay_bytes.data(), relay_bytes.size());
     }
 }
 

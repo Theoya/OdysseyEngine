@@ -79,9 +79,87 @@ static uint32_t parse_uint(const char* str, uint32_t default_val) {
     }
 }
 
+// ---------------------------------------------------------------------------
+// voice_range parser (pure).
+//
+// Contract: returns 25.0f when the attribute is absent or empty (the
+// documented d_max default from proximity_chat_audio.md). Rejects any other
+// invalid form with an Err — we deliberately do NOT silently fall back on
+// malformed voice_range because a mistyped value would cause hard-to-diagnose
+// audio behavior (infinite reach, silence, pathological distance curve).
+//
+// Authored-time bound is [0, 50] per the council-ratified decision
+// (docs/decisions/2026-04-20-proximity-voice-chat.md → "asset — schema
+// round-trip" and "netcode — anti-cheat hard-clamp"). The XSD encodes the
+// same bound; this function is the loader-side enforcement so scenes and
+// prefabs authored by agents / CLI without XSD validation still get caught.
+//
+// Accepted rejections, explicit by design:
+//   * empty / missing              → Ok(25.0f)   (default)
+//   * negative                     → Err
+//   * > 50.0                       → Err
+//   * NaN / infinity               → Err
+//   * non-numeric ("abc", "1x")    → Err
+//   * trailing garbage after number → Err
+// ---------------------------------------------------------------------------
+static Result<float> parse_voice_range(const char* raw) {
+    constexpr float kDefault = 25.0f;
+    constexpr float kMin = 0.0f;
+    constexpr float kMax = 50.0f;
+
+    if (!raw || raw[0] == '\0') {
+        return Result<float>::ok(kDefault);
+    }
+
+    // std::stof tolerates leading whitespace + consumes an optional sign.
+    // We reject a leading sign of '-' explicitly for a cleaner error message,
+    // and we require the entire string be consumed (no "12abc" sneaking past).
+    float value = 0.0f;
+    size_t consumed = 0;
+    try {
+        value = std::stof(raw, &consumed);
+    } catch (const std::invalid_argument&) {
+        return Result<float>::err(
+            std::string("voice_range: not a number: '") + raw + "'");
+    } catch (const std::out_of_range&) {
+        return Result<float>::err(
+            std::string("voice_range: out of float range: '") + raw + "'");
+    }
+
+    // Tail must be only whitespace.
+    for (size_t i = consumed; raw[i] != '\0'; ++i) {
+        if (raw[i] != ' ' && raw[i] != '\t' && raw[i] != '\r' && raw[i] != '\n') {
+            return Result<float>::err(
+                std::string("voice_range: trailing garbage: '") + raw + "'");
+        }
+    }
+
+    if (std::isnan(value)) {
+        return Result<float>::err("voice_range: NaN not permitted");
+    }
+    if (std::isinf(value)) {
+        return Result<float>::err("voice_range: infinity not permitted");
+    }
+    if (value < kMin) {
+        return Result<float>::err(
+            std::string("voice_range: negative value not permitted: '") +
+            raw + "'");
+    }
+    if (value > kMax) {
+        return Result<float>::err(
+            std::string("voice_range: exceeds authored-time max of 50.0m: '") +
+            raw + "'");
+    }
+    return Result<float>::ok(value);
+}
+
 // Populate an EntityDesc from a pugi <entity> node, capturing unknowns.
-static void parse_entity_node(const pugi::xml_node& entity_node,
-                              SceneData::EntityDesc& desc) {
+//
+// Returns Err when any strictly-validated attribute (currently only
+// `voice_range`) is malformed. All other attributes use lenient parsing for
+// backward compatibility with pre-voice scenes.
+static Result<bool> parse_entity_node(const pugi::xml_node& entity_node,
+                                      SceneData::EntityDesc& desc) {
     desc.id = entity_node.attribute("id").as_string("");
     desc.archetype = entity_node.attribute("archetype").as_string("");
     desc.count = entity_node.attribute("count").as_uint(1);
@@ -112,7 +190,7 @@ static void parse_entity_node(const pugi::xml_node& entity_node,
         }
     }
 
-    // Stats — attributes: health, max_health, ammo, stamina, speed
+    // Stats — attributes: health, max_health, ammo, stamina, speed, voice_range
     auto stats_node = entity_node.child("stats");
     if (stats_node) {
         desc.stats.health = stats_node.attribute("health").as_float(100.0f);
@@ -120,6 +198,20 @@ static void parse_entity_node(const pugi::xml_node& entity_node,
         desc.stats.ammo = stats_node.attribute("ammo").as_float(0.0f);
         desc.stats.stamina = stats_node.attribute("stamina").as_float(100.0f);
         desc.stats.speed = stats_node.attribute("speed").as_float(5.0f);
+
+        // voice_range is strictly validated (negative / NaN / >50 / malformed
+        // → Err). Absent attribute yields the documented 25.0m default.
+        auto vr_attr = stats_node.attribute("voice_range");
+        auto vr_result = parse_voice_range(vr_attr ? vr_attr.as_string() : nullptr);
+        if (vr_result.is_err()) {
+            std::string where = desc.id.empty()
+                                    ? (desc.archetype.empty() ? std::string{"<entity>"}
+                                                              : desc.archetype)
+                                    : desc.id;
+            return Result<bool>::err(
+                "entity '" + where + "': " + vr_result.error());
+        }
+        desc.voice_range = std::move(vr_result).value();
     }
 
     // Behavior shader
@@ -171,6 +263,8 @@ static void parse_entity_node(const pugi::xml_node& entity_node,
             desc.unknown_children_xml.push_back(node_to_string(child));
         }
     }
+
+    return Result<bool>::ok(true);
 }
 
 Result<SceneData> parse_scene_xml(const std::string& xml_content) {
@@ -220,7 +314,10 @@ Result<SceneData> parse_scene_xml(const std::string& xml_content) {
     // Parse entities — <entity> nodes directly under <scene>.
     for (auto entity_node : scene_node.children("entity")) {
         SceneData::EntityDesc desc;
-        parse_entity_node(entity_node, desc);
+        auto r = parse_entity_node(entity_node, desc);
+        if (r.is_err()) {
+            return Result<SceneData>::err(r.error());
+        }
         scene.entities.push_back(std::move(desc));
     }
 
@@ -229,7 +326,10 @@ Result<SceneData> parse_scene_xml(const std::string& xml_content) {
     for (auto sr_node : scene_node.children("spawn_region")) {
         for (auto entity_node : sr_node.children("entity")) {
             SceneData::EntityDesc desc;
-            parse_entity_node(entity_node, desc);
+            auto r = parse_entity_node(entity_node, desc);
+            if (r.is_err()) {
+                return Result<SceneData>::err(r.error());
+            }
             // Inherit spawn metadata from the surrounding <spawn_region>.
             // showcase uses attributes: position="x y z" radius="r"
             if (auto pos = sr_node.attribute("position")) {

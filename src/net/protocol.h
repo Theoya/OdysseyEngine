@@ -9,9 +9,21 @@ namespace odyssey::net {
 
 // Protocol constants
 constexpr uint32_t PROTOCOL_ID = 0x4F445953; // "ODYS"
-constexpr uint32_t PROTOCOL_VERSION = 1;
+// PROTOCOL_VERSION bumped 1 -> 2 on 2026-04-20 to introduce VOICE_FRAME and
+// the 8-byte voice sub-header. See docs/decisions/2026-04-20-proximity-voice-chat.md
+// and docs/design/proximity_chat_netcode.md for the ratified design. The bump
+// is a hard gate: v1 clients connecting to a v2 server receive CONNECT_REJECT
+// (see test_protocol_version_compat.cpp) — there is no silent downgrade, because
+// the wire now contains packet types a v1 peer cannot parse.
+constexpr uint32_t PROTOCOL_VERSION = 2;
 constexpr size_t MAX_PACKET_SIZE = 1200; // MTU-safe
 constexpr size_t MAX_ENTITIES_PER_PACKET = 32;
+
+// Server-enforced ceiling on the per-speaker voice_range stat. A compromised
+// client cannot broadcast map-wide by authoring a 10000m voice_range on its
+// prefab — the server hard-clamps on ingress. See council condition
+// "netcode — anti-cheat hard-clamp" in the ratified decision record.
+constexpr float VOICE_RANGE_MAX_METERS = 50.0f;
 
 // Packet types
 enum class PacketType : uint8_t {
@@ -34,7 +46,59 @@ enum class PacketType : uint8_t {
     // Misc
     PING = 30,
     PONG = 31,
+
+    // Proximity voice (v2+). Server relays VOICE_FRAME from speaker to
+    // in-range listeners after rebinding speaker_entity_id to the authed
+    // sender (anti-spoof). Opus payload is byte-exact pass-through.
+    VOICE_FRAME   = 40,
+    VOICE_CONTROL = 41,  // reserved: PTT state, mute toggles, etc.
 };
+
+// ─── Voice sub-header (v2) ────────────────────────────────────────────────────
+// Layout after the 16-byte PacketHeader when type == VOICE_FRAME:
+//
+//   offset  size  field
+//      0      4   speaker_entity_id   (u32, LE). Server REWRITES on relay to
+//                                     the authed sender's controlled entity.
+//                                     Clients SHOULD send 0; the server never
+//                                     trusts this field on ingress.
+//      4      2   sequence            (u16, LE). Per-speaker voice sequence,
+//                                     wraps. Separate from PacketHeader.sequence
+//                                     because voice cadence (50 Hz) differs
+//                                     from game tick and from reliable acks.
+//      6      1   frame_ms            (u8). 20 today. Reserved 10/40/60.
+//      7      1   flags               (u8). Bit layout:
+//                                       bit0 VAD_ACTIVE
+//                                       bit1 PTT_HELD
+//                                       bit2 FEC_PRESENT      (reserved)
+//                                       bit3 END_OF_TALK
+//                                       bit4-7 reserved, MUST be 0.
+//      8      N   opus_payload        Opus frame bytes. 24 kbps CBR × 20 ms
+//                                     ≈ 60 B typical (RFC 6716 §2.1.1).
+//
+// Total per voice packet on the wire:
+//   20 IP + 8 UDP + 16 PacketHeader + 8 voice sub-header + ~60 Opus ≈ 112 B.
+// Capped at MAX_PACKET_SIZE (1200 B) incl. header; voice frames are NEVER
+// fragmented — if Opus output would exceed the ceiling the frame is dropped
+// at the encoder (design doc §5).
+struct VoiceSubHeader {
+    uint32_t speaker_entity_id = 0;
+    uint16_t sequence = 0;
+    uint8_t  frame_ms = 20;
+    uint8_t  flags = 0;
+};
+static_assert(sizeof(uint32_t) + sizeof(uint16_t) + sizeof(uint8_t) + sizeof(uint8_t) == 8,
+              "VoiceSubHeader wire size must be exactly 8 bytes");
+
+// Voice flag bits. Kept out of an enum class so they can be OR'd with uint8_t
+// without casting noise in call sites.
+namespace voice_flags {
+constexpr uint8_t VAD_ACTIVE   = 1u << 0;
+constexpr uint8_t PTT_HELD     = 1u << 1;
+constexpr uint8_t FEC_PRESENT  = 1u << 2; // reserved, in-band Opus FEC later
+constexpr uint8_t END_OF_TALK  = 1u << 3;
+constexpr uint8_t RESERVED_MASK = 0b11110000u; // bits 4-7 MUST be zero in v2
+} // namespace voice_flags
 
 // Packet header (16 bytes)
 struct PacketHeader {
@@ -142,5 +206,12 @@ ConnectPayload deserialize_connect(const uint8_t* data, size_t size);
 InputPayload deserialize_input(const uint8_t* data, size_t size);
 std::vector<EntitySnapshot> deserialize_snapshot(const uint8_t* data, size_t size);
 LANBroadcastPayload deserialize_lan_broadcast(const uint8_t* data, size_t size);
+
+// ─── Voice sub-header wire helpers (pure) ─────────────────────────────────────
+// Encode/decode operate ONLY on the 8-byte voice sub-header, not the Opus
+// payload bytes. The caller is responsible for appending/consuming the
+// opaque opus_payload that follows.
+void write_voice_subheader(PacketWriter& w, const VoiceSubHeader& sh);
+VoiceSubHeader read_voice_subheader(PacketReader& r);
 
 } // namespace odyssey::net

@@ -60,6 +60,43 @@ Add proximity voice chat to OdysseyEngine as a new subsystem at `src/audio/voice
 
 None. Two abstentions (game-ai-engineer, lighting-mood-architect) on out-of-domain grounds; no rejects.
 
+## Protocol diff (v1 → v2)
+
+```
+PROTOCOL_VERSION:  1 → 2   (src/net/protocol.h:18)
+
+PacketType enum — additions only (no reorder, no removal):
+  + VOICE_FRAME   = 40
+  + VOICE_CONTROL = 41   (reserved for future PTT / mute-sync messages)
+
+New struct (after PacketHeader when type == VOICE_FRAME):
+  struct VoiceSubHeader {                       // 8 bytes, static_assert
+      uint32_t speaker_entity_id;  // +0  REWRITTEN by server on relay
+      uint16_t sequence;           // +4  per-speaker u16, wraps
+      uint8_t  frame_ms;           // +6  20 today, 10/40/60 reserved
+      uint8_t  flags;              // +7  bit0 VAD_ACTIVE
+                                   //     bit1 PTT_HELD
+                                   //     bit2 FEC_PRESENT (reserved)
+                                   //     bit3 END_OF_TALK
+                                   //     bit4-7 MUST be 0  (RESERVED_MASK)
+  };
+
+Wire layout for VOICE_FRAME packet:
+  [IP 20][UDP 8][PacketHeader 16][VoiceSubHeader 8][opus_payload N]
+  Typical: 112 B total. Hard cap MAX_PACKET_SIZE = 1200 B, never fragmented.
+
+No existing packet type changes layout. ConnectPayload.version still
+carries PROTOCOL_VERSION, so v1 clients connecting to v2 servers are
+cleanly rejected by version mismatch (test: ProtocolVersionCompat).
+
+Security invariants (test: VoiceRelay):
+  - Server rewrites speaker_entity_id on every ingress (anti-spoof).
+  - voice_range clamped to 50 m max on ingress.
+  - Server never relays a voice frame back to its speaker.
+  - END_OF_TALK frames are not relayed.
+  - bits 4-7 of flags non-zero → ReservedFlagsSet error on deserialize.
+```
+
 ## Follow-up triggers
 
 - **game-ai-engineer:** if voice becomes an AI perception signal (enemies hearing chat), return to council as a Nadir-side change.

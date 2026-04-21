@@ -27,6 +27,7 @@ find_package(pugixml CONFIG REQUIRED)
 find_package(CLI11 CONFIG REQUIRED)
 find_package(GTest CONFIG REQUIRED)
 find_package(imgui CONFIG REQUIRED)
+find_package(Opus CONFIG REQUIRED)
 
 # ── Gather sources for the engine library ────────────────────────────────────
 file(GLOB_RECURSE CORE_SOURCES      CONFIGURE_DEPENDS "src/core/*.cpp"      "src/core/*.h")
@@ -40,6 +41,13 @@ file(GLOB_RECURSE APP_SOURCES       CONFIGURE_DEPENDS "src/app/*.cpp"       "src
 list(FILTER APP_SOURCES EXCLUDE REGEX "odyssey_main\\.cpp$")
 list(FILTER APP_SOURCES EXCLUDE REGEX "odyssey_editor_main\\.cpp$")
 file(GLOB_RECURSE NET_SOURCES       CONFIGURE_DEPENDS "src/net/*.cpp"       "src/net/*.h")
+# voice_frame.{h,cpp} lives under src/audio/voice/ but is wire-level netcode
+# (the VOICE_FRAME deserialize path is on the server relay hot loop). Keep it
+# inside odyssey_engine so the engine doesn't link-depend on odyssey_voice.
+# The fuller voice stack (codec, jitter buffer, DSP, IO) ships in odyssey_voice.
+file(GLOB VOICE_FRAME_SOURCES CONFIGURE_DEPENDS
+    "src/audio/voice/voice_frame.cpp"
+    "src/audio/voice/voice_frame.h")
 file(GLOB_RECURSE MCP_SOURCES       CONFIGURE_DEPENDS "src/mcp/*.cpp"       "src/mcp/*.h")
 file(GLOB_RECURSE DEBUG_SOURCES     CONFIGURE_DEPENDS "src/debug/*.cpp"     "src/debug/*.h")
 file(GLOB_RECURSE ANIM_SOURCES      CONFIGURE_DEPENDS "src/animation/*.cpp" "src/animation/*.h")
@@ -56,6 +64,7 @@ set(ENGINE_SOURCES
     ${CLI_SOURCES}
     ${APP_SOURCES}
     ${NET_SOURCES}
+    ${VOICE_FRAME_SOURCES}
     ${MCP_SOURCES}
     ${DEBUG_SOURCES}
     ${ANIM_SOURCES}
@@ -87,6 +96,49 @@ target_link_libraries(odyssey_engine
 # Windows: link Winsock2 for networking and MCP
 if(WIN32)
   target_link_libraries(odyssey_engine PUBLIC ws2_32)
+endif()
+
+# ── Voice static library (proximity chat) ───────────────────────────────────
+# Owns the codec wrap, jitter buffer, DSP (marty), and WASAPI IO (marty).
+# voice_frame.{h,cpp} is intentionally part of odyssey_engine instead (see
+# above) because the server's relay loop needs to parse it — putting it in
+# odyssey_voice would create a link cycle engine<->voice.
+# Council condition: Opus is wrapped behind odyssey::audio::voice::Codec;
+# <opus/opus.h> MUST NOT leak out of this library.
+file(GLOB_RECURSE VOICE_SOURCES CONFIGURE_DEPENDS
+    "src/audio/voice/*.cpp"
+    "src/audio/voice/*.h"
+    "src/audio/voice/dsp/*.cpp"
+    "src/audio/voice/dsp/*.h"
+    "src/audio/voice/io/*.cpp"
+    "src/audio/voice/io/*.h"
+)
+# voice_frame.cpp is already inside odyssey_engine — strip it from the voice
+# lib source list to avoid multiple-definition link errors.
+list(FILTER VOICE_SOURCES EXCLUDE REGEX "voice_frame\\.(cpp|h)$")
+
+if(VOICE_SOURCES)
+  add_library(odyssey_voice STATIC ${VOICE_SOURCES})
+
+  target_include_directories(odyssey_voice
+    PUBLIC
+      $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/src>
+  )
+
+  target_link_libraries(odyssey_voice
+    PUBLIC
+      odyssey_engine # for core/result.h, net/protocol.h, voice_frame.h
+    PRIVATE
+      Opus::opus
+  )
+
+  if(WIN32)
+    # WASAPI + MMDevice + avrt (Multimedia Class Scheduler) for the IO layer
+    # that marty owns under src/audio/voice/io/. ole32/uuid supply the COM
+    # apartment + CLSIDs; mmdevapi supplies IMMDeviceEnumerator; avrt the
+    # AvSetMmThreadCharacteristics (glitch-free realtime priority).
+    target_link_libraries(odyssey_voice PUBLIC ole32 uuid mmdevapi avrt)
+  endif()
 endif()
 
 # Engine-provided entry point — games just implement create_game().
@@ -160,6 +212,11 @@ if(UNIT_TEST_SOURCES)
       odyssey_engine
       GTest::gtest_main
   )
+  # Link odyssey_voice into tests if it was built — test_codec and
+  # test_jitter_buffer exercise its surface directly.
+  if(TARGET odyssey_voice)
+    target_link_libraries(odyssey_tests_unit PRIVATE odyssey_voice)
+  endif()
   add_test(NAME unit_tests COMMAND odyssey_tests_unit)
 endif()
 
