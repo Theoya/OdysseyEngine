@@ -30,7 +30,10 @@ static const std::unordered_set<std::string>& known_entity_attrs() {
 static const std::unordered_set<std::string>& known_entity_children() {
     static const std::unordered_set<std::string> s{
         "transform", "stats", "behavior", "mesh", "material",
-        "script", "spawn_region", "pack"
+        "script", "spawn_region", "pack",
+        // Phase 4: <tag name="..."/> is a known child. Consumed into
+        // EntityDesc::tags; serialized back in insertion order.
+        "tag"
     };
     return s;
 }
@@ -254,6 +257,14 @@ static Result<bool> parse_entity_node(const pugi::xml_node& entity_node,
         desc.pack_leader = pack_node.attribute("leader").as_string("");
     }
 
+    // Phase 4: <tag name="..."/> — unbounded, authored-order preserved.
+    // An empty name attribute is accepted (the XSD marks `name` required
+    // but the loader tolerates empty strings so a partially-authored tag
+    // the Inspector just created round-trips without spurious errors).
+    for (auto tag_node : entity_node.children("tag")) {
+        desc.tags.emplace_back(tag_node.attribute("name").as_string(""));
+    }
+
     // Capture unknown element children.
     const auto& known_child = known_entity_children();
     for (auto child : entity_node.children()) {
@@ -392,6 +403,8 @@ void populate_entities(EntityManager& manager, const SceneData& scene) {
                 entity->components.material_path = desc.material_src;
                 entity->components.script_class = desc.script_class;
                 entity->components.script_config = desc.script_config;
+                entity->components.voice_range = desc.voice_range;
+                entity->components.tags = desc.tags;
             }
         } else {
             // Batch spawn
@@ -409,6 +422,8 @@ void populate_entities(EntityManager& manager, const SceneData& scene) {
                 entity->components.material_path = desc.material_src;
                 entity->components.script_class = desc.script_class;
                 entity->components.script_config = desc.script_config;
+                entity->components.voice_range = desc.voice_range;
+                entity->components.tags = desc.tags;
 
                 // Offset positions for batch spawning within the spawn region
                 if (!desc.spawn_type.empty() && desc.spawn_radius > 0.0f) {

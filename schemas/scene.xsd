@@ -44,6 +44,13 @@
       <xs:element name="material"     type="od:MaterialType"     minOccurs="0" maxOccurs="1"/>
       <xs:element name="script"       type="od:ScriptType"       minOccurs="0" maxOccurs="unbounded"/>
       <xs:element name="pack"         type="od:PackType"         minOccurs="0" maxOccurs="1"/>
+      <!-- Free-text gameplay tags. Added in editor Phase 4 as the canonical
+           demonstration of the four-step schema-add ritual: EntityComponents
+           was extended, this XSD entry, the Inspector's "Tags" sub-editor,
+           and the scene_serializer's emit path. Order-preserving; unbounded
+           so entities can carry multiple orthogonal tags (e.g. "interactive",
+           "flammable", "quest_item"). -->
+      <xs:element name="tag"          type="od:TagType"          minOccurs="0" maxOccurs="unbounded"/>
       <!-- spawn_region is also allowed as a CHILD of entity in shooter_arena
            shape (batch-spawn metadata scoped to one entity descriptor). -->
       <xs:element name="spawn_region" type="od:SpawnRegionType"  minOccurs="0" maxOccurs="1"/>
@@ -120,6 +127,11 @@
   <!-- Pack (flocking / squad) -->
   <xs:complexType name="PackType">
     <xs:attribute name="leader" type="xs:string" use="required"/>
+  </xs:complexType>
+
+  <!-- Tag (Phase 4 free-text gameplay label). Required `name`, no children. -->
+  <xs:complexType name="TagType">
+    <xs:attribute name="name" type="xs:string" use="required"/>
   </xs:complexType>
 
   <!-- Spawn region -->

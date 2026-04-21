@@ -67,6 +67,15 @@ struct SceneData {
         // so SceneData has stable lifetime independent of pugi's arena.
         // Rare in the current showcase but allowed by the contract.
         std::vector<std::string> unknown_children_xml;
+
+        // Phase 4: free-text gameplay tags. Authored in scene XML as repeated
+        //   <tag name="..."/>
+        // children under <entity>. Preserved in authored order; round-trips
+        // byte-identical via the preserved-source echo path AND the
+        // reconstruction path. This is the first component wired through the
+        // full four-step schema-add ritual (EntityComponents ← XSD ← Inspector
+        // ← serializer) in the editor pipeline.
+        std::vector<std::string> tags;
     };
 
     std::vector<EntityDesc> entities;

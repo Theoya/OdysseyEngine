@@ -48,6 +48,18 @@ cd build && ./Release/odyssey_tests_pipeline.exe # pipeline tests (requires GPU)
 - XML for all asset formats (scene, prefab, material, mesh)
 - .nadir extension for behavior shaders (valid GLSL compute with auto-prepended preamble)
 
+## Implementation Delegation Protocol
+
+**All advisory/design agents MUST delegate hands-on coding to the `council-implementation-coder` agent.** The 7 council agents (game-ai-engineer, game-asset-engineer, game-engine-architect, lighting-mood-architect, marty-odonnell-composer, netcode-engineer, vibe-story-guardian), the `3d-asset-modeler`, and any other advisory agent are design/domain-reasoning roles. When their recommendation requires actual file edits, code writes, test additions, or build/run work in the OdysseyEngine codebase, they MUST route that work to `council-implementation-coder` via the Agent tool — they do not write code themselves.
+
+**Why this split:** The advisory agents run on Opus for deep domain reasoning; the coder runs on Sonnet for fast, cheap execution. Opus-level thinking is wasted on mechanical file edits, and Sonnet-level thinking is wrong for design. Keeping them separate makes iteration fast *and* thoughtful — Opus plans, Sonnet ships.
+
+**Applies to:** C++20, GLSL/`.nadir` shaders, XML assets (scene/prefab/material/mesh/skeleton/animation/actions/music/lighting_profile), XSD schemas, CMake, tests, and any file under `src/`, `demo/`, `behaviors/`, `schemas/`, `shaders/`, `tests/`, or `docs/decisions/`.
+
+**Does not apply to:** the advisory agent's own persistent memory files under `.claude/agent-memory/<agent>/`, or documents the agent itself is explicitly asked to author (design notes, tips docs, charter entries). An agent may also hand the coder a pre-written code snippet as part of the spec.
+
+**Workflow:** advisory agent produces an approved spec (inline in the conversation or as a `docs/decisions/<YYYY-MM-DD>-<slug>.md` record), then spawns `council-implementation-coder` with that spec and waits for the Implementation Report. Do not re-open design debate at implementation time; if scope has grown, the coder escalates back to the caller to re-convene the council.
+
 ## Engineering Mandates
 1. **Pure/lean functions by default.** Any function that can be pure, is pure. Side effects isolated to thin I/O boundary wrappers (GPU submit, file I/O, socket send, audio hardware). Pure layer exhaustively unit-tested; impure layer integration-tested.
 2. **Success + failure tests.** Every `Result<T,E>`-returning function gets at least one expected-success test per success path and one expected-failure test per distinct error mode.
@@ -74,7 +86,11 @@ Before any non-trivial engine or game design change, invoke `/council` and wait 
 - marty-odonnell-composer: 4 (can force escalation single-handed)
 - netcode-engineer: 2
 - vibe-story-guardian: 2
+- 3d-asset-modeler: 2 (added 2026-04-21)
+- council-implementation-coder: 1 (implementation feasibility lens only)
 - user: 4 (tiebreaker; invoked on escalation)
+
+**Totals (excluding user):** non-physics = 20, physics = 21. The coder's single vote reflects its narrow role — it weighs in only on whether a proposal is mechanically implementable under the mandates, not on design merit.
 
 ### Agent-bound skills (invoke when working in the agent's domain)
 See agent cards at `C:\Users\THadfield\.claude\skills\council\agents\*.md` for each agent's bound skill list.

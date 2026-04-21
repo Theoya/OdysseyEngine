@@ -443,3 +443,232 @@ TEST(SceneSerializer, MutatedVoiceRangeBackToDefaultOmitsAttribute) {
     EXPECT_EQ(out.find("voice_range"), std::string::npos)
         << "voice_range default should be omitted, not emitted:\n" << out;
 }
+
+// ---------------------------------------------------------------------------
+// Phase 4: <tag> round-trip coverage.
+//
+// Contract:
+//   * A scene that authored N tags on one entity round-trips byte-identical.
+//   * The reconstruction path emits tags in authored order with the correct
+//     XML shape (`<tag name="..."/>`).
+//   * Mutating tags + flipping `mutated` → reconstruction preserves the new
+//     tag list (parse-back round-trip).
+// ---------------------------------------------------------------------------
+
+namespace {
+
+std::string build_tags_scene(std::initializer_list<const char*> tag_names) {
+    std::ostringstream s;
+    s << "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n"
+      << "<scene name=\"tg\" version=\"1\">\n"
+      << "  <entity id=\"player\" archetype=\"player\">\n";
+    for (auto* t : tag_names) {
+        s << "    <tag name=\"" << t << "\"/>\n";
+    }
+    s << "  </entity>\n"
+      << "</scene>\n";
+    return s.str();
+}
+
+} // namespace
+
+TEST(SceneSerializer, TagsAuthoredRoundTripByteIdentical) {
+    // 3 tags — matches the Phase 4 acceptance target in the decision record.
+    std::string src = build_tags_scene({"interactive", "flammable", "quest_item"});
+    auto loaded = parse_scene_xml(src);
+    ASSERT_TRUE(loaded.is_ok()) << loaded.error();
+    auto scene = std::move(loaded).value();
+    scene.preserved_source = src;
+
+    ASSERT_EQ(scene.entities.size(), 1u);
+    const auto& tags = scene.entities.at(0).tags;
+    ASSERT_EQ(tags.size(), 3u);
+    EXPECT_EQ(tags[0], "interactive");
+    EXPECT_EQ(tags[1], "flammable");
+    EXPECT_EQ(tags[2], "quest_item");
+
+    // Echo path — byte-identical.
+    auto ser = serialize_scene_to_string(scene);
+    ASSERT_TRUE(ser.is_ok());
+    EXPECT_EQ(std::move(ser).value(), src);
+}
+
+TEST(SceneSerializer, TagsReconstructionEmitsCorrectShape) {
+    // Force reconstruction: verify the emitted XML carries the tags with the
+    // expected `<tag name="..."/>` shape and in authored order.
+    std::string src = build_tags_scene({"alpha", "beta"});
+    auto loaded = parse_scene_xml(src);
+    ASSERT_TRUE(loaded.is_ok());
+    auto scene = std::move(loaded).value();
+
+    SerializeOptions opts;
+    opts.force_reconstruct = true;
+    auto ser = serialize_scene_to_string(scene, opts);
+    ASSERT_TRUE(ser.is_ok());
+    const std::string out = std::move(ser).value();
+
+    // Both tags appear, in order.
+    size_t pa = out.find("<tag name=\"alpha\"/>");
+    size_t pb = out.find("<tag name=\"beta\"/>");
+    ASSERT_NE(pa, std::string::npos) << out;
+    ASSERT_NE(pb, std::string::npos) << out;
+    EXPECT_LT(pa, pb);
+
+    // Round-trip parse: same tag list.
+    auto re = parse_scene_xml(out);
+    ASSERT_TRUE(re.is_ok()) << re.error();
+    ASSERT_EQ(re.value().entities.size(), 1u);
+    const auto& got = re.value().entities.at(0).tags;
+    ASSERT_EQ(got.size(), 2u);
+    EXPECT_EQ(got[0], "alpha");
+    EXPECT_EQ(got[1], "beta");
+}
+
+TEST(SceneSerializer, TagsMutationRoundTrips) {
+    // Start from a scene with two tags. Add one, remove one, flip mutated,
+    // serialize, parse back, verify the new list.
+    std::string src = build_tags_scene({"one", "two"});
+    auto loaded = parse_scene_xml(src);
+    ASSERT_TRUE(loaded.is_ok());
+    auto scene = std::move(loaded).value();
+
+    // Inspector-like mutation:
+    auto& tags = scene.entities.at(0).tags;
+    tags.erase(tags.begin());           // remove "one"
+    tags.emplace_back("three");          // append "three"
+    scene.mutated = true;
+
+    auto ser = serialize_scene_to_string(scene);
+    ASSERT_TRUE(ser.is_ok());
+    auto re = parse_scene_xml(std::move(ser).value());
+    ASSERT_TRUE(re.is_ok());
+    const auto& got = re.value().entities.at(0).tags;
+    ASSERT_EQ(got.size(), 2u);
+    EXPECT_EQ(got[0], "two");
+    EXPECT_EQ(got[1], "three");
+}
+
+TEST(SceneSerializer, NoTagsMeansNoTagElements) {
+    // A scene with zero tags must not grow phantom <tag> elements on either
+    // the echo path or the reconstruction path.
+    std::string src =
+        "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n"
+        "<scene name=\"nt\" version=\"1\">\n"
+        "  <entity id=\"x\" archetype=\"player\"/>\n"
+        "</scene>\n";
+    auto loaded = parse_scene_xml(src);
+    ASSERT_TRUE(loaded.is_ok());
+    auto scene = std::move(loaded).value();
+    scene.preserved_source = src;
+
+    auto echo = serialize_scene_to_string(scene);
+    ASSERT_TRUE(echo.is_ok());
+    EXPECT_EQ(std::move(echo).value(), src);
+
+    SerializeOptions opts; opts.force_reconstruct = true;
+    auto rec = serialize_scene_to_string(scene, opts);
+    ASSERT_TRUE(rec.is_ok());
+    EXPECT_EQ(rec.value().find("<tag"), std::string::npos);
+}
+
+// ---------------------------------------------------------------------------
+// Phase 4: programmatic transform mutation round-trip.
+//
+// The acceptance flow: open showcase.scene.xml, mutate one entity's
+// transform.position, serialize, load back, verify the change landed AND no
+// other field drifted.
+// ---------------------------------------------------------------------------
+
+TEST(SceneSerializer, ShowcaseTransformMutationRoundTrip) {
+    auto path = demo_path("demo/showcase/showcase.scene.xml");
+    ASSERT_TRUE(std::filesystem::exists(path));
+
+    auto loaded = load_scene_file(path);
+    ASSERT_TRUE(loaded.is_ok()) << loaded.error();
+    auto scene = std::move(loaded).value();
+
+    // Pick a known entity in the showcase — the arena floor.
+    SceneData::EntityDesc* target = nullptr;
+    size_t target_idx = 0;
+    for (size_t i = 0; i < scene.entities.size(); ++i) {
+        if (scene.entities[i].id == "arena_floor") {
+            target = &scene.entities[i];
+            target_idx = i;
+            break;
+        }
+    }
+    ASSERT_NE(target, nullptr);
+
+    // Snapshot every other entity to verify non-drift afterwards.
+    auto before = scene.entities;
+
+    // Mutate just the position.
+    const vec3 new_pos{12.5f, 0.25f, -3.75f};
+    target->transform.position = new_pos;
+    scene.mutated = true;
+
+    // Serialize (reconstruction path) then parse back.
+    auto ser = serialize_scene_to_string(scene);
+    ASSERT_TRUE(ser.is_ok()) << ser.error();
+    auto re = parse_scene_xml(std::move(ser).value());
+    ASSERT_TRUE(re.is_ok()) << re.error();
+    auto& reloaded = re.value();
+
+    ASSERT_EQ(reloaded.entities.size(), scene.entities.size());
+
+    // The mutated entity has the new position.
+    ASSERT_TRUE(target_idx < reloaded.entities.size());
+    const auto& after = reloaded.entities[target_idx];
+    EXPECT_EQ(after.id, "arena_floor");
+    EXPECT_FLOAT_EQ(after.transform.position.x, new_pos.x);
+    EXPECT_FLOAT_EQ(after.transform.position.y, new_pos.y);
+    EXPECT_FLOAT_EQ(after.transform.position.z, new_pos.z);
+
+    // Every OTHER entity's id + archetype + position matches the original.
+    for (size_t i = 0; i < reloaded.entities.size(); ++i) {
+        if (i == target_idx) continue;
+        EXPECT_EQ(reloaded.entities[i].id,        before[i].id);
+        EXPECT_EQ(reloaded.entities[i].archetype, before[i].archetype);
+        EXPECT_FLOAT_EQ(reloaded.entities[i].transform.position.x,
+                        before[i].transform.position.x);
+        EXPECT_FLOAT_EQ(reloaded.entities[i].transform.position.y,
+                        before[i].transform.position.y);
+        EXPECT_FLOAT_EQ(reloaded.entities[i].transform.position.z,
+                        before[i].transform.position.z);
+    }
+}
+
+TEST(SceneSerializer, FileRoundTripAfterMutation) {
+    // End-to-end: load → mutate position → serialize_scene (file) → reload →
+    // value is persisted. This is the exact flow Ctrl+S in the editor takes.
+    auto path = demo_path("demo/showcase/showcase.scene.xml");
+    auto scene = load_scene_file(path).value();
+    // Mutate.
+    SceneData::EntityDesc* arena = nullptr;
+    for (auto& d : scene.entities) if (d.id == "arena_floor") arena = &d;
+    ASSERT_NE(arena, nullptr);
+    arena->transform.position = vec3{5.0f, 0.0f, 5.0f};
+    scene.mutated = true;
+
+    auto tmp = std::filesystem::temp_directory_path() /
+               "odyssey_test_phase4_mutate_roundtrip.scene.xml";
+    std::error_code ec;
+    std::filesystem::remove(tmp, ec);
+
+    auto w = serialize_scene(scene, tmp);
+    ASSERT_TRUE(w.is_ok()) << w.error();
+
+    // Reload the written file and check the value persisted.
+    auto reloaded = load_scene_file(tmp);
+    ASSERT_TRUE(reloaded.is_ok()) << reloaded.error();
+    const SceneData::EntityDesc* re_arena = nullptr;
+    for (const auto& d : reloaded.value().entities) {
+        if (d.id == "arena_floor") { re_arena = &d; break; }
+    }
+    ASSERT_NE(re_arena, nullptr);
+    EXPECT_FLOAT_EQ(re_arena->transform.position.x, 5.0f);
+    EXPECT_FLOAT_EQ(re_arena->transform.position.y, 0.0f);
+    EXPECT_FLOAT_EQ(re_arena->transform.position.z, 5.0f);
+
+    std::filesystem::remove(tmp, ec);
+}
