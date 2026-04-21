@@ -1,0 +1,75 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  animation.xsd — keyframe animation clip schema.
+
+  Matches odyssey::anim::AnimationClip as authored in
+  demo/fps_humanoid/assets/{idle,walk_cycle}.anim.xml.
+
+  Shape:
+    <animation name="walk_cycle" duration="0.8" looping="true">
+      <track bone="root">
+        <key time="0.0" position="0 0.95 0" rotation="0 0 0 1"/>
+        <key time="0.4" position="0 0.97 0" rotation="0 0 0 1"/>
+      </track>
+    </animation>
+
+  Invariants (enforced at load-time, not by XSD):
+    - Every <track bone="..."> must resolve against the bound skeleton.
+    - Keyframe times must be monotonically non-decreasing and <= duration.
+    - Track must have >= 1 keyframe.
+-->
+<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema"
+           targetNamespace="https://odysseyengine.dev/animation"
+           xmlns:od="https://odysseyengine.dev/animation"
+           elementFormDefault="qualified">
+
+  <xs:element name="animation" type="od:AnimationType"/>
+
+  <xs:complexType name="AnimationType">
+    <xs:sequence>
+      <xs:element name="track" type="od:TrackType" minOccurs="1" maxOccurs="unbounded"/>
+    </xs:sequence>
+    <xs:attribute name="name"     type="xs:string" use="required"/>
+    <xs:attribute name="duration" type="od:PositiveFloat" use="required"/>
+    <xs:attribute name="looping"  type="xs:boolean" default="false"/>
+    <xs:attribute name="version"  type="xs:positiveInteger" default="1"/>
+  </xs:complexType>
+
+  <xs:complexType name="TrackType">
+    <xs:sequence>
+      <xs:element name="key" type="od:KeyframeType" minOccurs="1" maxOccurs="unbounded"/>
+    </xs:sequence>
+    <xs:attribute name="bone" type="xs:string" use="required"/>
+  </xs:complexType>
+
+  <xs:complexType name="KeyframeType">
+    <xs:attribute name="time"     type="od:NonNegativeFloat" use="required"/>
+    <xs:attribute name="position" type="od:Vec3" default="0 0 0"/>
+    <xs:attribute name="rotation" type="od:Quat" default="0 0 0 1"/>
+    <xs:attribute name="scale"    type="od:Vec3" default="1 1 1"/>
+  </xs:complexType>
+
+  <xs:simpleType name="PositiveFloat">
+    <xs:restriction base="xs:float">
+      <xs:minExclusive value="0.0"/>
+    </xs:restriction>
+  </xs:simpleType>
+  <xs:simpleType name="NonNegativeFloat">
+    <xs:restriction base="xs:float">
+      <xs:minInclusive value="0.0"/>
+    </xs:restriction>
+  </xs:simpleType>
+
+  <xs:simpleType name="Vec3">
+    <xs:restriction base="xs:string">
+      <xs:pattern value="\s*-?[0-9]*\.?[0-9]+\s+-?[0-9]*\.?[0-9]+\s+-?[0-9]*\.?[0-9]+\s*"/>
+    </xs:restriction>
+  </xs:simpleType>
+
+  <xs:simpleType name="Quat">
+    <xs:restriction base="xs:string">
+      <xs:pattern value="\s*-?[0-9]*\.?[0-9]+\s+-?[0-9]*\.?[0-9]+\s+-?[0-9]*\.?[0-9]+\s+-?[0-9]*\.?[0-9]+\s*"/>
+    </xs:restriction>
+  </xs:simpleType>
+
+</xs:schema>
