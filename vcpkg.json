@@ -15,6 +15,7 @@
     },
     "spdlog",
     "shaderc",
+    "opus",
     "pugixml",
     "cli11",
     "gtest"

@@ -25,6 +25,21 @@ struct SceneData {
         uint32_t count = 1;  // for batch spawning
         Transform transform;
         EntityStats stats;
+
+        // Proximity-voice audibility radius in meters, parsed from the
+        // `voice_range` attribute on <stats>. Default 25.0f = d_max from the
+        // inverse-amplitude attenuation curve authored in
+        // docs/design/proximity_chat_audio.md. Authored-time bound is
+        // [0, 50]; server hard-clamps ingress to 50m at runtime
+        // (docs/decisions/2026-04-20-proximity-voice-chat.md).
+        //
+        // Intentionally NOT a member of `EntityStats` because that struct is
+        // uploaded byte-for-byte to the Nadir GPU SSBO (EntityStatsGPU) and
+        // adding a 6th float would require a matching shader-side layout
+        // bump. Voice is a CPU-side audio/net concern, so it rides on
+        // EntityDesc instead.
+        float voice_range = 25.0f;
+
         std::string behavior_shader;
         std::string mesh_src;
         std::string material_src;

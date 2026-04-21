@@ -1,4 +1,5 @@
 #include "net/client.h"
+#include "audio/voice/voice_frame.h"
 #include <spdlog/spdlog.h>
 #include <cstring>
 
@@ -131,6 +132,43 @@ void Client::send_input(const InputPayload& input) {
     }
 }
 
+bool Client::send_voice_frame(const uint8_t* opus_payload,
+                              size_t size,
+                              uint16_t sequence,
+                              uint8_t flags)
+{
+    if (state_ != ClientState::CONNECTED) return false;
+
+    // Sanity: we never fragment voice. 16 B header + 8 B sub-header + payload
+    // must fit in MAX_PACKET_SIZE. Drop (not split) on overflow.
+    constexpr size_t kOverhead = 16 + 8;
+    if (size > MAX_PACKET_SIZE - kOverhead) {
+        spdlog::warn("Voice frame {} B exceeds MTU budget — dropped", size);
+        return false;
+    }
+
+    // Assemble the VoiceFrame with speaker_entity_id = 0. The server rewrites
+    // this field on relay (anti-spoof keystone, design doc §8). Clients are
+    // documented to send 0; any other value is ignored by the server.
+    odyssey::audio::voice::VoiceFrame vf;
+    vf.header.protocol_id = PROTOCOL_ID;
+    vf.header.sequence = sequence_++;
+    vf.header.ack = remote_sequence_;
+    vf.header.ack_bits = ack_bits_;
+    vf.header.type = PacketType::VOICE_FRAME;
+    vf.voice.speaker_entity_id = 0;      // server will rewrite
+    vf.voice.sequence = sequence;
+    vf.voice.frame_ms = 20;
+    vf.voice.flags = flags;
+    if (opus_payload && size > 0) {
+        vf.opus_payload.assign(opus_payload, opus_payload + size);
+    }
+
+    auto bytes = odyssey::audio::voice::serialize_voice_frame(vf);
+    auto r = socket_.send_to(server_address_, bytes.data(), bytes.size());
+    return r.is_ok();
+}
+
 void Client::process_packet(const uint8_t* data, size_t size) {
     if (size < 16) return;
 
@@ -184,6 +222,20 @@ void Client::process_packet(const uint8_t* data, size_t size) {
         case PacketType::PONG:
             // RTT estimation could be done here by tracking ping send times
             break;
+
+        case PacketType::VOICE_FRAME: {
+            // Parse and dispatch to the audio layer callback. Dropping here
+            // (no callback set) is normal for voice-disabled clients.
+            if (!voice_cb_) break;
+            auto parsed = odyssey::audio::voice::deserialize_voice_frame(data, size);
+            if (parsed.is_err()) {
+                spdlog::debug("Client voice frame parse failed: {}",
+                              odyssey::audio::voice::to_string(parsed.error()));
+                break;
+            }
+            voice_cb_(parsed.value());
+            break;
+        }
 
         default:
             break;

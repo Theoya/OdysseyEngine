@@ -72,11 +72,16 @@ static void append_entity(std::ostringstream& out,
     bool has_transform = (desc.transform.position != vec3{0.f} ||
                           desc.transform.rotation != quat{1.f, 0.f, 0.f, 0.f} ||
                           desc.transform.scale != vec3{1.f});
+    // voice_range default is 25.0f (= d_max from proximity_chat_audio.md).
+    // Emit only when it differs from default — this preserves byte-identical
+    // round-trip for all pre-voice scenes that never author the attribute.
+    constexpr float kVoiceRangeDefault = 25.0f;
     bool has_stats = (desc.stats.health != 100.0f ||
                       desc.stats.max_health != 100.0f ||
                       desc.stats.ammo != 0.0f ||
                       desc.stats.stamina != 100.0f ||
-                      desc.stats.speed != 5.0f);
+                      desc.stats.speed != 5.0f ||
+                      desc.voice_range != kVoiceRangeDefault);
     bool has_children = has_transform || has_stats ||
                         !desc.behavior_shader.empty() ||
                         !desc.mesh_src.empty() ||
@@ -112,6 +117,11 @@ static void append_entity(std::ostringstream& out,
             out << " stamina=\"" << fmt_float(desc.stats.stamina) << "\"";
         if (desc.stats.speed != 5.0f)
             out << " speed=\"" << fmt_float(desc.stats.speed) << "\"";
+        // voice_range: emit only when it deviates from 25.0m default so that
+        // scenes that never authored the attribute round-trip byte-identical
+        // via the reconstruction path as well as the preserved-source echo.
+        if (desc.voice_range != kVoiceRangeDefault)
+            out << " voice_range=\"" << fmt_float(desc.voice_range) << "\"";
         out << "/>\n";
     }
     if (!desc.behavior_shader.empty()) {

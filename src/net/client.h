@@ -3,11 +3,21 @@
 #include "net/protocol.h"
 #include "core/types.h"
 #include "core/result.h"
+#include <functional>
 #include <string>
 #include <vector>
 #include <deque>
 
+namespace odyssey::audio::voice { struct VoiceFrame; }
+
 namespace odyssey::net {
+
+// Callback invoked when a VOICE_FRAME relayed by the server arrives on this
+// client. The audio layer subscribes via set_voice_frame_callback(). Passed by
+// const-ref so the callback can copy the opus_payload into a jitter buffer
+// without a second allocation.
+using VoiceFrameCallback =
+    std::function<void(const odyssey::audio::voice::VoiceFrame& frame)>;
 
 enum class ClientState {
     DISCONNECTED,
@@ -32,6 +42,19 @@ public:
 
     // Send player input
     void send_input(const InputPayload& input);
+
+    // Send one Opus-encoded voice frame upstream to the server. `opus_payload`
+    // is opaque bytes from the Codec; the client layer owns the per-speaker
+    // u16 sequence and flag assembly. If size would exceed MAX_PACKET_SIZE
+    // after headers, the frame is dropped (voice is never fragmented).
+    // Returns true on send, false on drop/not-connected.
+    bool send_voice_frame(const uint8_t* opus_payload,
+                          size_t size,
+                          uint16_t sequence,
+                          uint8_t flags);
+
+    // Subscribe to inbound voice frames. Replaces any prior callback.
+    void set_voice_frame_callback(VoiceFrameCallback cb) { voice_cb_ = std::move(cb); }
 
     // Get latest server snapshot
     const std::vector<EntitySnapshot>& get_snapshot() const { return current_snapshot_; }
@@ -75,6 +98,9 @@ private:
     // Stats
     float rtt_ = 0.0f;
     float packet_loss_ = 0.0f;
+
+    // Voice
+    VoiceFrameCallback voice_cb_;
 };
 
 } // namespace odyssey::net

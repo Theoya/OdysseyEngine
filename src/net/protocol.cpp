@@ -286,4 +286,26 @@ LANBroadcastPayload deserialize_lan_broadcast(const uint8_t* data, size_t size) 
     return payload;
 }
 
+// ─── Voice sub-header ─────────────────────────────────────────────────────────
+// Wire order matches the byte-layout comment in protocol.h. LE u32 / LE u16
+// use the same encoding as every other field in the packet, which keeps the
+// whole packet uniformly little-endian and debugger-friendly with a single
+// hexdump mental model.
+
+void write_voice_subheader(PacketWriter& w, const VoiceSubHeader& sh) {
+    w.write_u32(sh.speaker_entity_id); // offset 0..3
+    w.write_u16(sh.sequence);          // offset 4..5
+    w.write_u8(sh.frame_ms);           // offset 6
+    w.write_u8(sh.flags);              // offset 7
+}
+
+VoiceSubHeader read_voice_subheader(PacketReader& r) {
+    VoiceSubHeader sh;
+    sh.speaker_entity_id = r.read_u32();
+    sh.sequence          = r.read_u16();
+    sh.frame_ms          = r.read_u8();
+    sh.flags             = r.read_u8();
+    return sh;
+}
+
 } // namespace odyssey::net
