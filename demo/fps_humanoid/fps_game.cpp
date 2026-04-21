@@ -36,6 +36,13 @@ static constexpr int   NUM_ENEMIES            = 8;
 static constexpr float SPAWN_RADIUS           = 30.0f;
 static constexpr float PLAYER_HIT_RADIUS      = 2.0f;
 
+// The Berserk-Halo hero enemy: replaces enemy index 0 and spawns at
+// closer range with higher HP — mini-boss encounter.
+static constexpr int   BERSERK_ENEMY_INDEX    = 0;
+static constexpr float BERSERK_SPAWN_RADIUS   = 22.0f;
+static constexpr float BERSERK_HP             = 180.0f;
+static const    char*  BERSERK_ASSETS_DIR     = "demo/showcase/assets/berserk_halo_mk3";
+
 // ---------------------------------------------------------------------------
 // on_init — spawn enemies in a circle, set up ground plane
 // ---------------------------------------------------------------------------
@@ -57,33 +64,63 @@ Result<bool> FPSHumanoidGame::on_init(GameContext& ctx) {
     for (int i = 0; i < NUM_ENEMIES; ++i) {
         float angle = static_cast<float>(i) / static_cast<float>(NUM_ENEMIES)
                       * glm::two_pi<float>();
-        float x = std::cos(angle) * SPAWN_RADIUS;
-        float z = std::sin(angle) * SPAWN_RADIUS;
+        // The Berserk-Halo hero spawns at a closer, facing-player position.
+        bool is_berserk = (i == BERSERK_ENEMY_INDEX);
+        float radius = is_berserk ? BERSERK_SPAWN_RADIUS : SPAWN_RADIUS;
+        float x = std::cos(angle) * radius;
+        float z = std::sin(angle) * radius;
 
         auto& enemy = enemies_[i];
         enemy.position = {x, 0.0f, z};
-        enemy.health = 60.0f;
-        enemy.max_health = 60.0f;
-        enemy.alive = true;
         enemy.death_timer = 0.0f;
         enemy.move_speed = 0.0f;
         enemy.was_walking = false;
-        enemy.base_color = {0.9f, 0.15f, 0.1f, 1.0f};
+        enemy.alive = true;
+        enemy.is_berserk = is_berserk;
 
-        // Vary colors slightly per enemy
-        float hue_shift = static_cast<float>(i) * 0.05f;
-        enemy.base_color.r = std::clamp(0.9f + hue_shift, 0.0f, 1.0f);
-        enemy.base_color.g = std::clamp(0.15f - hue_shift * 0.3f, 0.0f, 1.0f);
+        if (is_berserk) {
+            // Mini-boss: more HP, heavier armor color, uses BerserkHaloCharacter.
+            enemy.health = BERSERK_HP;
+            enemy.max_health = BERSERK_HP;
+            enemy.base_color = {0.12f, 0.12f, 0.14f, 1.0f}; // near-black matte
 
-        auto init_result = enemy.character.initialize(assets_dir_);
-        if (init_result.is_err()) {
-            spdlog::warn("FPSHumanoidGame: failed to init enemy {}: {}", i, init_result.error());
-            continue;
+            enemy.berserk_character = std::make_unique<BerserkHaloCharacter>();
+            auto init_result = enemy.berserk_character->initialize(
+                assets_dir_, std::filesystem::path(BERSERK_ASSETS_DIR));
+            if (init_result.is_err()) {
+                spdlog::error("FPSHumanoidGame: failed to init BERSERK enemy: {}",
+                              init_result.error());
+                // Fallback to stock humanoid on failure so the game still runs.
+                enemy.berserk_character.reset();
+                enemy.is_berserk = false;
+                auto fb = enemy.character.initialize(assets_dir_);
+                if (fb.is_err()) continue;
+                enemy.character.set_color(enemy.base_color);
+                enemy.character.play_idle();
+            } else {
+                enemy.berserk_character->set_base_color(enemy.base_color);
+                enemy.berserk_character->play_idle();
+            }
+        } else {
+            enemy.health = 60.0f;
+            enemy.max_health = 60.0f;
+            enemy.base_color = {0.9f, 0.15f, 0.1f, 1.0f};
+
+            // Vary colors slightly per enemy
+            float hue_shift = static_cast<float>(i) * 0.05f;
+            enemy.base_color.r = std::clamp(0.9f + hue_shift, 0.0f, 1.0f);
+            enemy.base_color.g = std::clamp(0.15f - hue_shift * 0.3f, 0.0f, 1.0f);
+
+            auto init_result = enemy.character.initialize(assets_dir_);
+            if (init_result.is_err()) {
+                spdlog::warn("FPSHumanoidGame: failed to init enemy {}: {}", i, init_result.error());
+                continue;
+            }
+
+            enemy.character.set_color(enemy.base_color);
+            enemy.character.set_gun_visible(true);
+            enemy.character.play_idle();
         }
-
-        enemy.character.set_color(enemy.base_color);
-        enemy.character.set_gun_visible(true);
-        enemy.character.play_idle();
 
         gameplay_.enemies_total++;
         gameplay_.enemies_alive++;
@@ -272,10 +309,18 @@ void FPSHumanoidGame::tick_enemies(float dt) {
 
         // Animation crossfade based on movement state
         if (is_moving && !enemy.was_walking) {
-            enemy.character.crossfade_to_walk(0.2f);
+            if (enemy.is_berserk && enemy.berserk_character) {
+                enemy.berserk_character->crossfade_to_walk(0.3f);
+            } else {
+                enemy.character.crossfade_to_walk(0.2f);
+            }
             enemy.was_walking = true;
         } else if (!is_moving && enemy.was_walking) {
-            enemy.character.crossfade_to_idle(0.2f);
+            if (enemy.is_berserk && enemy.berserk_character) {
+                enemy.berserk_character->crossfade_to_idle(0.3f);
+            } else {
+                enemy.character.crossfade_to_idle(0.2f);
+            }
             enemy.was_walking = false;
         }
 
@@ -283,17 +328,27 @@ void FPSHumanoidGame::tick_enemies(float dt) {
         float ground_y = collision_system_.ground_height_at(enemy.position.x, enemy.position.z);
         enemy.position.y = ground_y;
 
-        // Update humanoid character (animation + skeleton renderables)
-        enemy.character.update(dt, enemy.position, enemy.rotation,
-                               enemy.move_speed, 0.0f);
+        // Update character (animation + renderables)
+        if (enemy.is_berserk && enemy.berserk_character) {
+            enemy.berserk_character->update(dt, enemy.position, enemy.rotation,
+                                            enemy.move_speed, 0.0f);
+            // Hit flash on berserk: red pulse scaled by missing health.
+            float health_ratio = enemy.health / enemy.max_health;
+            float missing = 1.0f - health_ratio;
+            float pulse = std::sin(elapsed_time_ * 10.0f) * 0.5f + 0.5f;
+            enemy.berserk_character->set_hit_flash(missing * pulse * 0.6f);
+        } else {
+            enemy.character.update(dt, enemy.position, enemy.rotation,
+                                   enemy.move_speed, 0.0f);
+        }
 
         // Proximity melee damage to player
         if (grace_period_ <= 0.0f && dist < ENEMY_ATTACK_RANGE) {
             gameplay_.player_health -= ENEMY_DAMAGE_PER_SEC * dt;
         }
 
-        // Hit flash: tint red when damaged
-        if (enemy.health < enemy.max_health) {
+        // Hit flash (stock humanoid): tint red when damaged
+        if (!enemy.is_berserk && enemy.health < enemy.max_health) {
             float flash = std::sin(elapsed_time_ * 10.0f) * 0.5f + 0.5f;
             float health_ratio = enemy.health / enemy.max_health;
             vec4 flash_color = glm::mix(vec4(1.0f, 0.0f, 0.0f, 1.0f),
@@ -385,11 +440,16 @@ void FPSHumanoidGame::rebuild_renderables() {
             continue;
         }
 
-        // Append all skeleton renderables (cylinders for bones, spheres for joints)
-        const auto& char_renderables = enemy.character.get_renderables();
-        all_renderables_.insert(all_renderables_.end(),
-                                char_renderables.begin(),
-                                char_renderables.end());
+        // Append character renderables: berserk armor pieces OR stock stick-figure.
+        if (enemy.is_berserk && enemy.berserk_character) {
+            const auto& bh = enemy.berserk_character->get_renderables();
+            all_renderables_.insert(all_renderables_.end(), bh.begin(), bh.end());
+        } else {
+            const auto& char_renderables = enemy.character.get_renderables();
+            all_renderables_.insert(all_renderables_.end(),
+                                    char_renderables.begin(),
+                                    char_renderables.end());
+        }
     }
 
     // Projectiles

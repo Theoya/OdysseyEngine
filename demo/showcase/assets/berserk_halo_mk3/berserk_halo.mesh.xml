@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Berserk-Halo Mk3 Mjolnir — baked mesh descriptor.
+
+  Source: berserk_halo.obj, produced by build_berserk_halo.py from
+  berserk_halo_master.blend.  63 named components, triangulated on export.
+
+  Vertices: 5556   Normals: 5539   Tris: 10720
+  Built 2026-04-21 with Blender 2.93.5, axis_forward=-Z axis_up=+Y.
+
+  This descriptor is wired for the forward renderer's OBJ source path
+  (tiny_obj_loader in src/assets/mesh_loader.cpp).  Because the current
+  renderer only binds primitive mesh_types {box,sphere,ground,cylinder},
+  the fps_humanoid demo does NOT use this OBJ at runtime; it uses the
+  BerserkHaloCharacter variant that parents primitive RenderEntities to
+  the 19-bone skeleton.  This descriptor exists for (a) future OBJ
+  rendering support, (b) external tool validation, (c) engine round-trip
+  testing of the tiny_obj path.
+-->
+<mesh name="berserk_halo" version="1">
+  <source format="obj" path="demo/showcase/assets/berserk_halo_mk3/berserk_halo.obj"/>
+  <lod>
+    <level distance="0"   triangles="10720"/>
+    <level distance="25"  triangles="4500"/>
+    <level distance="60"  triangles="1500"/>
+  </lod>
+  <collider type="capsule" radius="0.55" height="2.10"/>
+</mesh>
