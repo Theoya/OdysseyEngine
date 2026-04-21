@@ -4,6 +4,7 @@
 #include "editor/inspector_panel.h"
 #include "editor/viewport_panel.h"
 #include "editor/log_panel.h"
+#include "editor/scene_viewport_renderer.h"
 
 #include "scene/scene_loader.h"
 
@@ -16,7 +17,11 @@
 
 #include <spdlog/spdlog.h>
 
+#include <glm/glm.hpp>
+#include <glm/gtc/matrix_transform.hpp>
+
 #include <algorithm>
+#include <cmath>
 #include <cstdio>
 #include <cstring>
 #include <string>
@@ -93,6 +98,13 @@ struct Editor::Impl {
     // Pointer to the log panel's sink installer (so Editor::initialize can
     // install the sink before the scene-loader starts logging).
     LogPanel* log_panel = nullptr;
+
+    // Phase 2: live viewport scene renderer.
+    SceneViewportRenderer viewport_renderer;
+    bool                  has_viewport_renderer = false;
+    VkDescriptorSet       viewport_ds = VK_NULL_HANDLE; // ImGui_ImplVulkan_AddTexture result
+    VkExtent2D            viewport_extent{1280, 720};
+    float                 camera_orbit_time = 0.0f;
 };
 
 // ---------------------------------------------------------------------------
@@ -383,6 +395,10 @@ static bool create_imgui_pool(Editor::Impl& impl) {
                     "vkCreateDescriptorPool(imgui)");
 }
 
+// Forward-declared helpers used by swapchain recreation & viewport wiring.
+static void destroy_swapchain_objects(Editor::Impl& impl);
+static bool rebuild_swapchain(Editor::Impl& impl);
+
 static bool init_imgui(Editor::Impl& impl) {
     IMGUI_CHECKVERSION();
     ImGui::CreateContext();
@@ -421,6 +437,46 @@ static bool init_imgui(Editor::Impl& impl) {
     // Newer imgui_impl_vulkan builds fonts on first frame — explicit call
     // is optional and not always available. Skip it.
     impl.has_imgui = true;
+    return true;
+}
+
+// Destroy only the swapchain-dependent objects (views, framebuffers, swapchain
+// handle). Leaves the render pass, command pool, semaphores, and ImGui state
+// intact — those are independent of swapchain extent.
+static void destroy_swapchain_objects(Editor::Impl& impl) {
+    auto dev = impl.device;
+    for (auto& fb : impl.sc_framebuffers) {
+        if (fb != VK_NULL_HANDLE) vkDestroyFramebuffer(dev, fb, nullptr);
+    }
+    impl.sc_framebuffers.clear();
+    for (auto& v : impl.sc_views) {
+        if (v != VK_NULL_HANDLE) vkDestroyImageView(dev, v, nullptr);
+    }
+    impl.sc_views.clear();
+    if (impl.swapchain != VK_NULL_HANDLE) {
+        vkDestroySwapchainKHR(dev, impl.swapchain, nullptr);
+        impl.swapchain = VK_NULL_HANDLE;
+    }
+}
+
+// Re-create the swapchain and its framebuffers at the current GLFW framebuffer
+// size. Handles the minimization case (size 0x0) by returning true without
+// building anything — caller should early-out until size is nonzero.
+static bool rebuild_swapchain(Editor::Impl& impl) {
+    int w = 0, h = 0;
+    glfwGetFramebufferSize(impl.window, &w, &h);
+    while (w == 0 || h == 0) {
+        glfwGetFramebufferSize(impl.window, &w, &h);
+        glfwWaitEvents();
+    }
+    vkDeviceWaitIdle(impl.device);
+
+    destroy_swapchain_objects(impl);
+
+    if (!create_swapchain(impl))   return false;
+    if (!create_framebuffers(impl)) return false;
+
+    impl.frame_idx = 0;
     return true;
 }
 
@@ -481,6 +537,34 @@ Result<bool> Editor::initialize(const std::filesystem::path& scene_path) {
     if (!create_cmd_and_sync(*impl_))  return Result<bool>::err("cmd/sync creation failed");
     if (!create_imgui_pool(*impl_))    return Result<bool>::err("imgui descriptor pool failed");
     if (!init_imgui(*impl_))           return Result<bool>::err("ImGui init failed");
+
+    // -------- Phase 2: Scene viewport renderer --------
+    {
+        SceneViewportInit vi{};
+        vi.phys_device     = impl_->phys_device;
+        vi.device          = impl_->device;
+        vi.graphics_queue  = impl_->gfx_queue;
+        vi.graphics_family = impl_->gfx_family;
+        vi.initial_extent  = impl_->viewport_extent;
+        vi.color_format    = VK_FORMAT_R8G8B8A8_UNORM; // stable for ImGui sample
+        auto vr = impl_->viewport_renderer.initialize(vi);
+        if (vr.is_err()) {
+            spdlog::warn("[editor] viewport renderer init failed: {} — viewport panel will fall back to placeholder",
+                         vr.error());
+        } else {
+            impl_->has_viewport_renderer = true;
+            // Register the offscreen image with ImGui so it can sample it
+            // as a regular texture from the panel. The returned descriptor
+            // set is the ImTextureID.
+            impl_->viewport_ds = ImGui_ImplVulkan_AddTexture(
+                impl_->viewport_renderer.offscreen_sampler(),
+                impl_->viewport_renderer.offscreen_view(),
+                VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+            state_.viewport_renderer = &impl_->viewport_renderer;
+            state_.viewport_texture_id = static_cast<void*>(impl_->viewport_ds);
+            spdlog::info("[editor] viewport renderer registered with ImGui");
+        }
+    }
 
     // -------- Scene load (non-fatal in Phase 1) --------
     if (!scene_path.empty()) {
@@ -598,6 +682,35 @@ void Editor::draw_status_bar() {
 }
 
 void Editor::draw_frame(float delta_time) {
+    // ---- Apply any viewport-resize request made last frame (outside any
+    //      command buffer recording) before touching the fence.
+    if (impl_->has_viewport_renderer &&
+        state_.viewport_requested_width > 0 && state_.viewport_requested_height > 0 &&
+        (state_.viewport_requested_width  != impl_->viewport_extent.width ||
+         state_.viewport_requested_height != impl_->viewport_extent.height)) {
+        VkExtent2D new_ext{state_.viewport_requested_width,
+                           state_.viewport_requested_height};
+        auto r = impl_->viewport_renderer.resize(new_ext);
+        if (r.is_err()) {
+            spdlog::warn("[editor] viewport resize failed: {}", r.error());
+        } else {
+            impl_->viewport_extent = new_ext;
+            // The ImGui descriptor must be re-pointed at the new image view.
+            // Free the old descriptor set and allocate a new one.
+            if (impl_->viewport_ds != VK_NULL_HANDLE) {
+                ImGui_ImplVulkan_RemoveTexture(impl_->viewport_ds);
+                impl_->viewport_ds = VK_NULL_HANDLE;
+            }
+            impl_->viewport_ds = ImGui_ImplVulkan_AddTexture(
+                impl_->viewport_renderer.offscreen_sampler(),
+                impl_->viewport_renderer.offscreen_view(),
+                VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+            state_.viewport_texture_id = static_cast<void*>(impl_->viewport_ds);
+        }
+    }
+    state_.viewport_requested_width = 0;
+    state_.viewport_requested_height = 0;
+
     // ---- Wait for the frame's fence so we can reuse its cmd buffer ----
     vkWaitForFences(impl_->device, 1, &impl_->in_flight[impl_->frame_idx],
                     VK_TRUE, UINT64_MAX);
@@ -608,10 +721,10 @@ void Editor::draw_frame(float delta_time) {
         impl_->image_available[impl_->frame_idx], VK_NULL_HANDLE, &image_index);
     if (acquire == VK_ERROR_OUT_OF_DATE_KHR || impl_->framebuffer_resized) {
         impl_->framebuffer_resized = false;
-        vkDeviceWaitIdle(impl_->device);
-        // Full swapchain teardown/rebuild omitted in Phase 1 — log and
-        // continue. Resize behaves poorly but does not crash.
-        spdlog::warn("[editor] swapchain out-of-date; Phase 1 skips resize");
+        // Phase 2: full swapchain recreation.
+        if (!rebuild_swapchain(*impl_)) {
+            spdlog::error("[editor] swapchain rebuild failed");
+        }
         return;
     }
 
@@ -638,6 +751,75 @@ void Editor::draw_frame(float delta_time) {
     VkCommandBufferBeginInfo bi{};
     bi.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
     vkBeginCommandBuffer(cmd, &bi);
+
+    // ---- Phase 2: record scene render into offscreen target FIRST ----
+    // The scene render pass' final layout is SHADER_READ_ONLY_OPTIMAL with
+    // an explicit subpass dependency (COLOR_ATTACHMENT_OUTPUT_BIT →
+    // FRAGMENT_SHADER_BIT), so ImGui can sample the image safely when the
+    // main render pass begins below — no manual pipeline barrier required.
+    if (impl_->has_viewport_renderer) {
+        // Advance camera orbit time only while in Play/Simulate modes so
+        // Edit mode feels like a paused scene.
+        if (state_.mode == Mode::Play || state_.mode == Mode::Simulate) {
+            impl_->camera_orbit_time += delta_time;
+        }
+
+        // Build an orbit VP matrix. The liminal mood wants a slow arc —
+        // orbit at radius 60, height 25, 0.05 rad/s.
+        const float r = 60.0f;
+        const float a = impl_->camera_orbit_time * 0.05f;
+        glm::vec3 eye(std::cos(a) * r, 25.0f, std::sin(a) * r);
+        glm::vec3 at(0.0f, 1.0f, 0.0f);
+        glm::vec3 up(0.0f, 1.0f, 0.0f);
+        glm::mat4 view = glm::lookAt(eye, at, up);
+        auto ext = impl_->viewport_renderer.extent();
+        float aspect = (ext.height > 0)
+            ? (static_cast<float>(ext.width) / static_cast<float>(ext.height))
+            : 1.0f;
+        glm::mat4 proj = glm::perspective(glm::radians(55.0f), aspect, 0.5f, 500.0f);
+        proj[1][1] *= -1.0f; // flip Y for Vulkan's clip space
+        glm::mat4 vp = proj * view;
+
+        // Convert entities to draw records. Color by archetype for quick
+        // visual scan (keeps the scene legible before Phase 4's materials).
+        std::vector<SceneDrawEntity> draws;
+        if (state_.entities) {
+            draws.reserve(state_.entities->entity_count());
+            for (const auto& [id, entity] : state_.entities->get_all_entities()) {
+                SceneDrawEntity d{};
+                const auto& t = entity.components.transform;
+                d.position[0] = t.position.x;
+                d.position[1] = t.position.y;
+                d.position[2] = t.position.z;
+                d.scale[0] = std::max(t.scale.x, 0.1f);
+                d.scale[1] = std::max(t.scale.y, 0.1f);
+                d.scale[2] = std::max(t.scale.z, 0.1f);
+                // Archetype → color table. Stable palette within the mood.
+                const std::string& a_name = entity.archetype;
+                if      (a_name == "player")              { d.color[0]=0.80f; d.color[1]=0.90f; d.color[2]=1.00f; }
+                else if (a_name == "static")              { d.color[0]=0.55f; d.color[1]=0.50f; d.color[2]=0.45f; }
+                else if (a_name == "enemy_pack_hunter")   { d.color[0]=0.85f; d.color[1]=0.35f; d.color[2]=0.35f; }
+                else if (a_name == "enemy_ranged")        { d.color[0]=0.90f; d.color[1]=0.55f; d.color[2]=0.30f; }
+                else if (a_name == "multi_arm_gunner")    { d.color[0]=1.00f; d.color[1]=0.25f; d.color[2]=0.45f; }
+                else if (a_name == "civilian")            { d.color[0]=0.75f; d.color[1]=0.75f; d.color[2]=0.85f; }
+                else if (a_name == "light")               { d.color[0]=1.00f; d.color[1]=0.95f; d.color[2]=0.75f; }
+                else if (a_name == "audio_source")        { d.color[0]=0.50f; d.color[1]=0.75f; d.color[2]=0.65f; }
+                else if (a_name == "system")              { d.color[0]=0.30f; d.color[1]=0.30f; d.color[2]=0.35f; }
+                else                                      { d.color[0]=0.60f; d.color[1]=0.60f; d.color[2]=0.70f; }
+                d.color[3] = 1.0f;
+                // Skip invisible/zero-scale entities (systems, music).
+                if (d.scale[0] < 0.05f) continue;
+                draws.push_back(d);
+            }
+        }
+
+        // Pass VP as column-major float[16] (glm::mat4 is column-major).
+        float vp_cm[16];
+        const float* ptr = reinterpret_cast<const float*>(&vp[0][0]);
+        for (int i = 0; i < 16; ++i) vp_cm[i] = ptr[i];
+
+        impl_->viewport_renderer.record(cmd, vp_cm, draws);
+    }
 
     VkClearValue clear{};
     clear.color = { {0.02f, 0.02f, 0.03f, 1.0f} };
@@ -678,16 +860,33 @@ void Editor::draw_frame(float delta_time) {
     pi.swapchainCount     = 1;
     pi.pSwapchains        = &impl_->swapchain;
     pi.pImageIndices      = &image_index;
-    vkQueuePresentKHR(impl_->gfx_queue, &pi);
+    VkResult present = vkQueuePresentKHR(impl_->gfx_queue, &pi);
+
+    if (present == VK_ERROR_OUT_OF_DATE_KHR || present == VK_SUBOPTIMAL_KHR ||
+        impl_->framebuffer_resized) {
+        impl_->framebuffer_resized = false;
+        if (!rebuild_swapchain(*impl_)) {
+            spdlog::error("[editor] swapchain rebuild failed after present");
+        }
+    }
 
     impl_->frame_idx = (impl_->frame_idx + 1) % static_cast<uint32_t>(impl_->cmd_buffers.size());
-    (void)delta_time;
 }
 
 void Editor::shutdown() {
     if (!impl_) return;
     if (impl_->device != VK_NULL_HANDLE) {
         vkDeviceWaitIdle(impl_->device);
+    }
+
+    // Viewport renderer first (ImGui may still be sampling it until shutdown).
+    if (impl_->has_viewport_renderer) {
+        if (impl_->has_imgui && impl_->viewport_ds != VK_NULL_HANDLE) {
+            ImGui_ImplVulkan_RemoveTexture(impl_->viewport_ds);
+            impl_->viewport_ds = VK_NULL_HANDLE;
+        }
+        impl_->viewport_renderer.shutdown();
+        impl_->has_viewport_renderer = false;
     }
 
     if (impl_->has_imgui) {

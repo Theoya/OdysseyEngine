@@ -48,6 +48,28 @@ public:
     VkRenderPass scene_render_pass() const { return scene_render_pass_; }
     VkFramebuffer scene_framebuffer() const { return scene_framebuffer_; }
 
+    // ---- Phase 2: editor viewport hand-off ------------------------------
+    // After a scene render pass completes, the offscreen image is left in
+    // VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL (see scene_render_pass_'s
+    // finalLayout in postprocess.cpp). These accessors let an external
+    // consumer — typically `ImGui_ImplVulkan_AddTexture(offscreen_sampler(),
+    // offscreen_view(), VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL)` — sample
+    // the scene directly without copying.
+    //
+    // Barrier audit (for /barrier-audit):
+    //   WRITE -> READ:  COLOR_ATTACHMENT_OUTPUT_BIT → FRAGMENT_SHADER_BIT
+    //                   COLOR_ATTACHMENT_WRITE_BIT  → SHADER_READ_BIT
+    //                   COLOR_ATTACHMENT_OPTIMAL    → SHADER_READ_ONLY_OPTIMAL
+    //   (produced by scene_render_pass finalLayout; no manual barrier needed
+    //    because the render pass's implicit subpass-end transition is
+    //    dependency-backed.)
+    //   READ -> WRITE:  handled by the next frame's scene_render_pass whose
+    //                   initialLayout=UNDEFINED + LOAD_OP_CLEAR makes no
+    //                   assumption about the prior layout.
+    VkImageView offscreen_view()    const { return offscreen_view_; }
+    VkSampler   offscreen_sampler() const { return offscreen_sampler_; }
+    VkExtent2D  offscreen_extent()  const { return extent_; }
+
     /// Apply post-processing: reads from offscreen texture, writes to swapchain image.
     void apply(VkCommandBuffer cmd, uint32_t swapchain_image_index,
                const CRTParams& crt, const EvaHUDParams& eva);

@@ -32,6 +32,7 @@ struct GLFWwindow;
 namespace odyssey::editor {
 
 class Panel;
+class SceneViewportRenderer;
 
 // Editor state — the single pure-data struct passed to every Panel::draw.
 // Anything that's worth saving to an editor-layout file lives here.
@@ -52,6 +53,24 @@ struct EditorState {
 
     // Status-bar text (last log line, load result, etc.)
     std::string status_line;
+
+    // --- Phase 2 viewport integration ---
+    // Pointer to the live scene-viewport renderer. ViewportPanel uses this
+    // to bind the offscreen image into ImGui and to trigger resizes. Null
+    // in tests that construct EditorState without a full editor.
+    SceneViewportRenderer* viewport_renderer = nullptr;
+
+    // ImGui-side descriptor set handle returned by ImGui_ImplVulkan_AddTexture.
+    // Managed by Editor (lifetime spans the editor session, recreated on
+    // offscreen-image resize). Cast to ImTextureID at draw time.
+    void* viewport_texture_id = nullptr;
+
+    // ViewportPanel writes the pixel size it would like the offscreen target
+    // to be. Editor reads and clears this each frame, applying the resize
+    // outside the ImGui frame so no command buffer is in flight.
+    // Zero (default) means "no request this frame".
+    uint32_t viewport_requested_width  = 0;
+    uint32_t viewport_requested_height = 0;
 };
 
 // Pure helper: given an entity pointer, produce a stable display label.

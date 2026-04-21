@@ -160,6 +160,26 @@ Engine::~Engine() {
 }
 
 // ---------------------------------------------------------------------------
+// set_mode — Phase 2 mode gating entry point.
+//
+// Effects, by mode:
+//   Edit      — Nadir dispatch skipped, scripts + physics skipped (the game
+//               honors ctx.mode). Camera input still feeds so the user can
+//               navigate the scene freely.
+//   Play      — Full simulation (original behavior).
+//   Simulate  — Nadir + physics run, scripts paused. Used for tuning AI.
+//
+// Safe to call from any thread the main loop serialises with — the Editor
+// calls it synchronously when the user clicks a toolbar button; the Engine
+// applies the change on the next process_frame().
+// ---------------------------------------------------------------------------
+void Engine::set_mode(Mode m) {
+    if (mode_ == m) return;
+    mode_ = m;
+    spdlog::info("Engine mode -> {}", mode_label(m));
+}
+
+// ---------------------------------------------------------------------------
 // initialize
 // ---------------------------------------------------------------------------
 
@@ -203,6 +223,7 @@ Result<bool> Engine::initialize(const EngineConfig& config,
 #endif
         ctx.window = window_;
         ctx.scene_path = config.scene_path;
+        ctx.mode = mode_;
 
         auto game_res = impl_->game->on_init(ctx);
         if (game_res.is_err()) {
@@ -511,9 +532,13 @@ void Engine::process_frame(float delta_time) {
 #endif
 
     // --- Game tick (GPU outputs now safe to readback) ---
-    if (impl_->game) {
+    // Phase 2 mode gating: in Edit mode we skip the game tick entirely —
+    // this naturally pauses scripts AND physics since both are driven by
+    // the game. In Simulate we still tick so the game can step physics,
+    // but the game is expected to honor ctx.mode and skip script logic.
+    if (impl_->game && mode_ != Mode::Edit) {
         GameContext ctx{};
-        ctx.delta_time = delta_time;
+        ctx.delta_time = mode_runs_physics(mode_) ? delta_time : 0.0f;
         ctx.total_time = total_time_;
         ctx.camera = &impl_->camera;
         ctx.input = &impl_->input;
@@ -523,6 +548,7 @@ void Engine::process_frame(float delta_time) {
 #endif
         ctx.window = window_;
         ctx.scene_path = impl_->config.scene_path;
+        ctx.mode = mode_;
         impl_->game->on_tick(ctx);
     }
 
@@ -548,9 +574,12 @@ void Engine::process_frame(float delta_time) {
     begin_info.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
     vkBeginCommandBuffer(cmd, &begin_info);
 
-    // Nadir compute dispatches
+    // Nadir compute dispatches — gated by Phase 2 execution mode.
+    // Edit mode: skip dispatch entirely. Play/Simulate: run as normal.
 #if ODYSSEY_HAS_NADIR
-    impl_->nadir_system.record_dispatches(cmd);
+    if (mode_runs_nadir(mode_)) {
+        impl_->nadir_system.record_dispatches(cmd);
+    }
 #endif
 
     // --- Build view-projection matrix ---
@@ -643,16 +672,17 @@ void Engine::process_frame(float delta_time) {
         }
     }
 #else
-    // Non-Vulkan: game tick without GPU
-    if (impl_->game) {
+    // Non-Vulkan: game tick without GPU (still mode-gated).
+    if (impl_->game && mode_ != Mode::Edit) {
         GameContext ctx{};
-        ctx.delta_time = delta_time;
+        ctx.delta_time = mode_runs_physics(mode_) ? delta_time : 0.0f;
         ctx.total_time = total_time_;
         ctx.camera = &impl_->camera;
         ctx.input = &impl_->input;
         ctx.entity_mgr = &impl_->entity_mgr;
         ctx.window = window_;
         ctx.scene_path = impl_->config.scene_path;
+        ctx.mode = mode_;
         impl_->game->on_tick(ctx);
     }
 #endif

@@ -2,6 +2,7 @@
 
 #include "core/types.h"
 #include "core/result.h"
+#include "core/mode.h"
 
 #include <string>
 #include <vector>
@@ -54,6 +55,11 @@ struct GameContext {
     nadir::NadirSystem* nadir_sys = nullptr;
     GLFWwindow* window = nullptr;
     std::filesystem::path scene_path;
+
+    // Phase 2: execution mode. Games that implement their own script/physics
+    // tick should gate on mode_runs_scripts() / mode_runs_physics() so the
+    // editor's Edit/Simulate modes behave correctly.
+    Mode mode = Mode::Play;
 };
 
 // ---------------------------------------------------------------------------

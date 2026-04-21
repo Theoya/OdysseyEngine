@@ -2,6 +2,7 @@
 
 #include "core/types.h"
 #include "core/result.h"
+#include "core/mode.h"
 #include "app/game.h"
 
 #include <cstdint>
@@ -70,6 +71,23 @@ public:
     /// True while the engine loop is active.
     bool is_running() const { return running_; }
 
+    // ---- Phase 2: Mode gating --------------------------------------------
+    // The current execution mode. Gates Nadir dispatch, script tick, and
+    // physics step. Rendering and camera input remain active in every mode.
+    Mode mode() const { return mode_; }
+
+    // Set the current mode. Safe to call at any time — changes take effect
+    // on the next process_frame(). Emits a log line for traceability.
+    void set_mode(Mode m);
+
+    // Pure predicates exposed for test harnesses. Thin wrappers over
+    // core/mode.h that capture the specific per-subsystem behavior the
+    // engine's main loop implements.
+    bool tick_would_dispatch_nadir()  const { return mode_runs_nadir(mode_); }
+    bool tick_would_run_scripts()     const { return mode_runs_scripts(mode_); }
+    bool tick_would_step_physics()    const { return mode_runs_physics(mode_); }
+    bool tick_would_run_camera()      const { return mode_runs_camera(mode_); }
+
 private:
     // Per-frame work
     void process_frame(float delta_time);
@@ -86,6 +104,7 @@ private:
     void shutdown_window();
 
     bool running_ = false;
+    Mode mode_ = Mode::Play;
     GLFWwindow* window_ = nullptr;
 
     // Resize / fullscreen

@@ -4,6 +4,7 @@
 #include "scene/entity_manager.h"
 #include <string>
 #include <filesystem>
+#include <utility>
 #include <vector>
 
 namespace odyssey::scene {
@@ -37,9 +38,41 @@ struct SceneData {
 
         // Pack info
         std::string pack_leader;
+
+        // --- Phase 2: preserve-unknowns ---
+        // Attributes on <entity> that are NOT in the known-fields set above.
+        // Stored in original insertion order. Examples from showcase:
+        //   (material_override, "demo/showcase/materials/gold_leaf.mat.xml")
+        //   (light_type, "directional"), (kelvin, "5500"), (intensity, "3.0")
+        //   (music_state_machine, "demo/showcase/music/showcase.music.xml")
+        std::vector<std::pair<std::string, std::string>> unknown_attributes;
+
+        // Child elements of <entity> that the loader did not consume.
+        // Snapshotted as raw serialized XML strings (NOT pugi handles)
+        // so SceneData has stable lifetime independent of pugi's arena.
+        // Rare in the current showcase but allowed by the contract.
+        std::vector<std::string> unknown_children_xml;
     };
 
     std::vector<EntityDesc> entities;
+
+    // --- Phase 2: preserve-unknowns (scene level) ---
+    // Unknown attributes on the <scene> root. Example from showcase:
+    //   lighting_profile="liminal", audio_bank="showcase_bank"
+    std::vector<std::pair<std::string, std::string>> unknown_scene_attributes;
+
+    // Raw UTF-8 contents of the source file, captured at load time.
+    // The Phase 2 serializer writes this back verbatim when `mutated` is
+    // false — guaranteeing byte-identical round-trip without needing a
+    // full programmatic reconstruction path.
+    // Empty for SceneData built in-memory (tests, procedural scenes).
+    std::string preserved_source;
+
+    // Set to true by any API that modifies SceneData after load. Serializer
+    // honors this: unmutated → echo preserved_source, mutated → reconstruct.
+    // Phase 2 Inspector remains read-only so `mutated` stays false in the
+    // editor's main flow; explicit tests exercise both paths.
+    bool mutated = false;
 };
 
 // Pure: parse scene XML string to SceneData
