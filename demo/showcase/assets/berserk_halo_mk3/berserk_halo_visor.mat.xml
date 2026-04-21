@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Berserk-Halo Mk3 Mjolnir — visor slit.  Menacing thin white line.
+  Until an emissive channel ships, this is a bright albedo + zero metallic, zero roughness
+  so it reads blown-out against the near-black armor.
+-->
+<material name="berserk_halo_visor" version="1">
+  <shader vertex="shaders/pbr.vert" fragment="shaders/pbr.frag"/>
+  <properties>
+    <albedo>0.95 0.95 0.95 1.0</albedo>
+    <metallic>0.0</metallic>
+    <roughness>0.05</roughness>
+  </properties>
+</material>

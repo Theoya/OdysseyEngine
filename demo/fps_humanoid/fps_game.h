@@ -1,7 +1,9 @@
 #pragma once
 #include "app/game.h"
 #include "fps_humanoid/humanoid_character.h"
+#include "fps_humanoid/berserk_halo_character.h"
 #include "physics/collision_system.h"
+#include <memory>
 #include <vector>
 #include <string>
 
@@ -30,6 +32,10 @@ public:
 private:
     struct EnemyState {
         HumanoidCharacter character;
+        // Optional upgraded variant: when set, this is used instead of `character`
+        // and emits the Berserk-Halo armor pieces rigidly parented to the bones.
+        // Only one of {character, berserk_character} is "active" per enemy.
+        std::unique_ptr<BerserkHaloCharacter> berserk_character;
         vec3 position;
         quat rotation{1.0f, 0.0f, 0.0f, 0.0f};
         float health = 60.0f;
@@ -39,6 +45,7 @@ private:
         float move_speed = 0.0f;
         bool was_walking = false;
         vec4 base_color{0.9f, 0.15f, 0.1f, 1.0f};
+        bool is_berserk = false;
     };
 
     struct Projectile {

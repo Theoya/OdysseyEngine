@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Berserk-Halo Mk3 Mjolnir — monochrome matte armor material.
+  Charter fit: "Fantasy Etherealism Impressionism" — deep blacks with hard edge highlights.
+  Value palette per reference sheet: #1A1A1A base. No chromatic color. Low metallic, high roughness.
+  Albedo pushed slightly above pure black so the PBR lighter's edge term is not lost in clamp.
+  Texture maps deliberately omitted until the BCn baker is in-repo.
+-->
+<material name="berserk_halo_armor" version="1">
+  <shader vertex="shaders/pbr.vert" fragment="shaders/pbr.frag"/>
+  <properties>
+    <albedo>0.10 0.10 0.10 1.0</albedo>
+    <metallic>0.15</metallic>
+    <roughness>0.78</roughness>
+  </properties>
+</material>

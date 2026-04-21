@@ -1,0 +1,160 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Berserk-Halo Mk3 — heavy walk cycle.
+
+  Schema: matches schemas/animation.xsd (tracks of position+rotation keys).
+  Skeleton binding: demo/fps_humanoid/assets/humanoid.skeleton.xml (19 bones).
+
+  Design vs the stock walk_cycle.anim.xml (0.8s, light):
+    - 1.4s total (heavier thump cadence, ~1.75x slower)
+    - Root drops 4 cm on plant frames (vs 2 cm) — weighted step
+    - Permanent forward hunch via chest +3deg X
+    - Lower_leg bends deeper at mid-swing (lift the armored boot)
+    - Arm swing amplitude REDUCED (armor restricts travel): 0.08 instead of 0.15
+    - Shoulders counter-rotate 2deg as weight transfers
+    - Spine yaw swing also halved (less hip twist = heavy read)
+    - Loops looking-for: feet plant at 0.0 and 0.7 (half period)
+
+  Key frame schedule (s):
+    0.0    R foot plant  (deepest root dip)
+    0.2    R foot weight transfer, L foot starts lift
+    0.35   mid-step (both bent), root at apex
+    0.5    L foot approach, R foot behind
+    0.7    L foot plant  (deepest root dip, mirror of 0.0)
+    0.9    L foot weight transfer
+    1.05   mid-step mirrored
+    1.2    R foot approach
+    1.4    back to start
+-->
+<animation name="berserk_halo_walk" duration="1.4" looping="true">
+
+  <!-- Root: heavy bob, drops on plants, apex mid-swing. -->
+  <track bone="root">
+    <key time="0.0"  position="0 0.91 0" rotation="0 0 0 1"/>
+    <key time="0.2"  position="0 0.93 0" rotation="0 0 0 1"/>
+    <key time="0.35" position="0 0.96 0" rotation="0 0 0 1"/>
+    <key time="0.5"  position="0 0.94 0" rotation="0 0 0 1"/>
+    <key time="0.7"  position="0 0.91 0" rotation="0 0 0 1"/>
+    <key time="0.9"  position="0 0.93 0" rotation="0 0 0 1"/>
+    <key time="1.05" position="0 0.96 0" rotation="0 0 0 1"/>
+    <key time="1.2"  position="0 0.94 0" rotation="0 0 0 1"/>
+    <key time="1.4"  position="0 0.91 0" rotation="0 0 0 1"/>
+  </track>
+
+  <!-- Spine: half-amplitude yaw (0.015 vs 0.03 in stock walk) + permanent hunch.
+       Quaternion xyzw; x=hunch forward, y=yaw about vertical. -->
+  <track bone="spine">
+    <key time="0.0"  position="0 0.2 0" rotation="0.025 0.015 0 0.999"/>
+    <key time="0.35" position="0 0.2 0" rotation="0.025 0     0 0.999"/>
+    <key time="0.7"  position="0 0.2 0" rotation="0.025 -0.015 0 0.999"/>
+    <key time="1.05" position="0 0.2 0" rotation="0.025 0     0 0.999"/>
+    <key time="1.4"  position="0 0.2 0" rotation="0.025 0.015 0 0.999"/>
+  </track>
+
+  <!-- Chest: fixed +3deg forward hunch. Tiny yaw counter to spine for weight transfer. -->
+  <track bone="chest">
+    <key time="0.0"  position="0 0.2 0" rotation="0.026 -0.010 0 0.999"/>
+    <key time="0.35" position="0 0.2 0" rotation="0.026 0      0 0.999"/>
+    <key time="0.7"  position="0 0.2 0" rotation="0.026 0.010  0 0.999"/>
+    <key time="1.05" position="0 0.2 0" rotation="0.026 0      0 0.999"/>
+    <key time="1.4"  position="0 0.2 0" rotation="0.026 -0.010 0 0.999"/>
+  </track>
+
+  <!-- Head: slight forward pitch mirroring hunch (helmet looks forward, not up). -->
+  <track bone="head">
+    <key time="0.0"  position="0 0.1 0" rotation="-0.015 0 0 0.999"/>
+    <key time="0.7"  position="0 0.1 0" rotation="-0.015 0 0 0.999"/>
+    <key time="1.4"  position="0 0.1 0" rotation="-0.015 0 0 0.999"/>
+  </track>
+
+  <!-- Right leg: deep lift mid-step. Forward at 0.0 plant; back at 0.7 plant. -->
+  <track bone="upper_leg_r">
+    <key time="0.0"  position="0.1 -0.4 0" rotation="0.28  0 0 0.96"/>
+    <key time="0.2"  position="0.1 -0.4 0" rotation="0.15  0 0 0.98"/>
+    <key time="0.35" position="0.1 -0.4 0" rotation="0.0   0 0 1.0"/>
+    <key time="0.5"  position="0.1 -0.4 0" rotation="-0.15 0 0 0.98"/>
+    <key time="0.7"  position="0.1 -0.4 0" rotation="-0.28 0 0 0.96"/>
+    <key time="0.9"  position="0.1 -0.4 0" rotation="-0.15 0 0 0.98"/>
+    <key time="1.05" position="0.1 -0.4 0" rotation="0.0   0 0 1.0"/>
+    <key time="1.2"  position="0.1 -0.4 0" rotation="0.15  0 0 0.98"/>
+    <key time="1.4"  position="0.1 -0.4 0" rotation="0.28  0 0 0.96"/>
+  </track>
+  <track bone="lower_leg_r">
+    <key time="0.0"  position="0 -0.4 0" rotation="0     0 0 1.0"/>
+    <key time="0.2"  position="0 -0.4 0" rotation="0.35  0 0 0.94"/>
+    <key time="0.35" position="0 -0.4 0" rotation="0.45  0 0 0.89"/>
+    <key time="0.5"  position="0 -0.4 0" rotation="0.25  0 0 0.97"/>
+    <key time="0.7"  position="0 -0.4 0" rotation="0     0 0 1.0"/>
+    <key time="0.9"  position="0 -0.4 0" rotation="0.10  0 0 0.99"/>
+    <key time="1.05" position="0 -0.4 0" rotation="0.20  0 0 0.98"/>
+    <key time="1.2"  position="0 -0.4 0" rotation="0.12  0 0 0.99"/>
+    <key time="1.4"  position="0 -0.4 0" rotation="0     0 0 1.0"/>
+  </track>
+
+  <!-- Left leg: mirror, 0.7s out of phase. Forward at 0.7 plant; back at 0.0 plant. -->
+  <track bone="upper_leg_l">
+    <key time="0.0"  position="-0.1 -0.4 0" rotation="-0.28 0 0 0.96"/>
+    <key time="0.2"  position="-0.1 -0.4 0" rotation="-0.15 0 0 0.98"/>
+    <key time="0.35" position="-0.1 -0.4 0" rotation="0.0   0 0 1.0"/>
+    <key time="0.5"  position="-0.1 -0.4 0" rotation="0.15  0 0 0.98"/>
+    <key time="0.7"  position="-0.1 -0.4 0" rotation="0.28  0 0 0.96"/>
+    <key time="0.9"  position="-0.1 -0.4 0" rotation="0.15  0 0 0.98"/>
+    <key time="1.05" position="-0.1 -0.4 0" rotation="0.0   0 0 1.0"/>
+    <key time="1.2"  position="-0.1 -0.4 0" rotation="-0.15 0 0 0.98"/>
+    <key time="1.4"  position="-0.1 -0.4 0" rotation="-0.28 0 0 0.96"/>
+  </track>
+  <track bone="lower_leg_l">
+    <key time="0.0"  position="0 -0.4 0" rotation="0     0 0 1.0"/>
+    <key time="0.2"  position="0 -0.4 0" rotation="0.10  0 0 0.99"/>
+    <key time="0.35" position="0 -0.4 0" rotation="0.20  0 0 0.98"/>
+    <key time="0.5"  position="0 -0.4 0" rotation="0.12  0 0 0.99"/>
+    <key time="0.7"  position="0 -0.4 0" rotation="0     0 0 1.0"/>
+    <key time="0.9"  position="0 -0.4 0" rotation="0.35  0 0 0.94"/>
+    <key time="1.05" position="0 -0.4 0" rotation="0.45  0 0 0.89"/>
+    <key time="1.2"  position="0 -0.4 0" rotation="0.25  0 0 0.97"/>
+    <key time="1.4"  position="0 -0.4 0" rotation="0     0 0 1.0"/>
+  </track>
+
+  <!-- Shoulder dip: 2deg rotation opposite to same-side leg for weight transfer read.
+       shoulder_r drops as right leg plants. -->
+  <track bone="shoulder_r">
+    <key time="0.0"  position="0.15 0 0" rotation="0 0 -0.018 0.9998"/>
+    <key time="0.7"  position="0.15 0 0" rotation="0 0  0.018 0.9998"/>
+    <key time="1.4"  position="0.15 0 0" rotation="0 0 -0.018 0.9998"/>
+  </track>
+  <track bone="shoulder_l">
+    <key time="0.0"  position="-0.15 0 0" rotation="0 0  0.018 0.9998"/>
+    <key time="0.7"  position="-0.15 0 0" rotation="0 0 -0.018 0.9998"/>
+    <key time="1.4"  position="-0.15 0 0" rotation="0 0  0.018 0.9998"/>
+  </track>
+
+  <!-- Arms: SMALL swing (0.08 amplitude, not 0.15) — armor is restrictive.
+       Arms swing OPPOSITE to same-side leg. Slightly held-forward baseline
+       (+0.04 X) because gauntlets are heavy. -->
+  <track bone="upper_arm_r">
+    <key time="0.0"  position="0 -0.28 0" rotation="-0.04 0 0 0.999"/>
+    <key time="0.35" position="0 -0.28 0" rotation="0.04  0 0 0.999"/>
+    <key time="0.7"  position="0 -0.28 0" rotation="0.12  0 0 0.993"/>
+    <key time="1.05" position="0 -0.28 0" rotation="0.04  0 0 0.999"/>
+    <key time="1.4"  position="0 -0.28 0" rotation="-0.04 0 0 0.999"/>
+  </track>
+  <track bone="lower_arm_r">
+    <key time="0.0"  position="0 -0.25 0" rotation="0.15 0 0 0.988"/>
+    <key time="0.7"  position="0 -0.25 0" rotation="0.20 0 0 0.980"/>
+    <key time="1.4"  position="0 -0.25 0" rotation="0.15 0 0 0.988"/>
+  </track>
+
+  <track bone="upper_arm_l">
+    <key time="0.0"  position="0 -0.28 0" rotation="0.12  0 0 0.993"/>
+    <key time="0.35" position="0 -0.28 0" rotation="0.04  0 0 0.999"/>
+    <key time="0.7"  position="0 -0.28 0" rotation="-0.04 0 0 0.999"/>
+    <key time="1.05" position="0 -0.28 0" rotation="0.04  0 0 0.999"/>
+    <key time="1.4"  position="0 -0.28 0" rotation="0.12  0 0 0.993"/>
+  </track>
+  <track bone="lower_arm_l">
+    <key time="0.0"  position="0 -0.25 0" rotation="0.20 0 0 0.980"/>
+    <key time="0.7"  position="0 -0.25 0" rotation="0.15 0 0 0.988"/>
+    <key time="1.4"  position="0 -0.25 0" rotation="0.20 0 0 0.980"/>
+  </track>
+
+</animation>

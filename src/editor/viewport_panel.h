@@ -19,9 +19,22 @@
 
 #include "editor/panel.h"
 
+#include <cstdint>
 #include <string>
 
 namespace odyssey::editor {
+
+// Pure data: the pixel extent a Vulkan offscreen target should be built at.
+struct ViewportPixelExtent {
+    uint32_t width;
+    uint32_t height;
+};
+
+// Pure helper (exposed for tests): convert a floating content-region size
+// (from ImGui::GetContentRegionAvail) into a clamped pixel extent suitable
+// for the offscreen render target. Clamps to a reasonable minimum so we
+// never request a 0x0 target during minimization/layout transitions.
+ViewportPixelExtent compute_viewport_pixel_extent(float content_w, float content_h);
 
 class ViewportPanel : public Panel {
 public:

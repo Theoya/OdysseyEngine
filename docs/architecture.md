@@ -559,3 +559,34 @@ Because Nadir behaviors are pure functions of their SSBO inputs, running the sam
 - **Deterministic** -- same inputs produce same outputs on client and server
 - **Bandwidth-efficient** -- send SSBO deltas (entity positions, stats) rather than behavior decisions
 - **Server-scalable** -- server GPU handles thousands of AI entities via compute dispatch, not CPU iteration
+
+---
+
+## Scene XML round-trip
+
+**Contract:** `scene::load_scene_file(path) -> scene::serialize_scene(scene, path)` produces byte-identical output for any unmutated SceneData. Lighting stubs, audio stubs, custom material overrides, scene-root attrs, comments, and indentation all survive the round trip.
+
+**Implementation** (see `src/scene/scene_loader.{h,cpp}` and `src/scene/scene_serializer.{h,cpp}`):
+
+- Loader reads the file in BINARY mode (CRLF preserved on Windows) and stores the raw text in `SceneData::preserved_source`.
+- Loader extracts known fields into `SceneData::EntityDesc`, and routes anything it doesn't recognize into two per-entity buckets:
+  - `unknown_attributes` -- `vector<pair<name, value>>`, insertion order preserved
+  - `unknown_children_xml` -- raw serialized XML strings (no pugi handles outliving parse)
+- Scene-root unknown attributes land in `SceneData::unknown_scene_attributes`.
+- Serializer has two paths:
+  - **Echo** (default for unmutated loads): writes `preserved_source` verbatim -- byte-identical guaranteed.
+  - **Reconstruction** (Phase 4+ authoring, or `SerializeOptions::force_reconstruct`): emits XML in the documented stable order: known attrs -> unknown attrs (insertion order) -> known children -> unknown children.
+
+**Ordering rule for the reconstruction path:**
+
+```
+<element known_attr_1 known_attr_2 ... unknown_attr_1 unknown_attr_2 ...>
+    <known_child_1/>
+    <known_child_2/>
+    ...
+    <unknown_child_1/>
+    ...
+</element>
+```
+
+Round-trip is regression-tested against both `demo/showcase/showcase.scene.xml` (deep preserve-unknowns coverage) and `demo/scenes/shooter_arena.scene.xml` (shooter-shape regression) in `tests/unit/scene/test_scene_serializer.cpp`. The `mutated` flag flips SceneData into reconstruction-on-serialize -- this is the hook the Phase 4 Inspector edits will use.

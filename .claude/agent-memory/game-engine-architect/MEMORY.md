@@ -1,2 +1,3 @@
 - [Showcase architect contract](project_showcase_architect.md) — rendering/physics/editor invariants and prefab xs:all constraint pinned for the showcase demo.
 - [Editor Phase 1 shape](project_editor_phase_1.md) — odyssey_editor is standalone (not engine-embedded), viewport is a placeholder, docking disabled, inspector read-only.
+- [Editor Phase 2 shape](project_editor_phase_2.md) — live viewport via editor-owned renderer, scene_serializer with preserve-unknowns, Engine::set_mode gating.
