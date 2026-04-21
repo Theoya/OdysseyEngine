@@ -1,0 +1,5 @@
+- [Project netcode state snapshot](project_netcode_snapshot.md) — Phase 5 skeleton present, UDP+protocol+server+client+replication live, no lag comp / no interest mgmt / no compression yet
+- [Authority model decisions](project_authority_model.md) — runtime scripts client-local only; server-authoritative AI (Nadir GPU non-determinism); physics fixed-point authority path
+- [Council triggers owned by netcode](feedback_council_triggers.md) — protocol version bump, tick/send rate, snapshot field add/remove/reorder, authority model flip
+- [Netcode rubric location](reference_netcode_rubric.md) — canonical 10-section design doc at C:\Users\THadfield\.claude\agent-knowledge\netcode-engineer\netcode_rubric.md
+- [Protocol v2 proposal — proximity voice](project_protocol_v2_proposal.md) — design doc landed 2026-04-20 (docs/design/proximity_chat_netcode.md); pending council vote on PROTOCOL_VERSION bump, Opus dep, server-relay topology

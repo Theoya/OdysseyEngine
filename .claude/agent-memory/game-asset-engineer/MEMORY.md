@@ -1,0 +1,4 @@
+- [BCn format policy](format_policy.md) — BC7 albedo, BC5 normals, BC4 metal/rough, BC6H HDR; never ship RGBA8 at runtime.
+- [Bindless set layout](bindless_layout.md) — set 1 = 4096 combined-image-samplers with UPDATE_AFTER_BIND; LightBuffer is SSBO not UBO.
+- [Round-trip serializer rule](roundtrip_rule.md) — serializer edits original pugixml doc in place, never regenerates; defaults never emitted.
+- [New-asset-type ritual](new_asset_ritual.md) — 11-step checklist; missing a step produces half-wired assets (parses but won't save, etc.).

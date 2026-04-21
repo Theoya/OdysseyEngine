@@ -3,6 +3,10 @@ build/
 out/
 cmake-build-*/
 
+# Claude Code — local-only state
+.claude/worktrees/
+.claude/settings.local.json
+
 # Compiled objects
 *.o
 *.obj

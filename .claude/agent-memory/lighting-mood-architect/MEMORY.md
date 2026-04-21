@@ -1,0 +1,3 @@
+- [Showcase lighting zone map](project_showcase_lighting.md) — six zones in one arena, one LightingProfile each, sun reused via per-zone override.
+- [Flicker must be deterministic](feedback_flicker_determinism.md) — tick-index + seed, never wall-clock; replay hashes depend on it.
+- [Post-FX stack order is fixed](project_postfx_stack_order.md) — profiles parameterize tonemap→bloom→grade→vignette→grain only; CRT + EVA are engine-owned.

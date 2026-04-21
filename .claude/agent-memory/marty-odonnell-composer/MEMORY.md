@@ -1,0 +1,6 @@
+- [Audio subsystem direction](project_audio_direction.md) — first-principles mixer + 4-API MusicDirector; no middleware
+- [Sound request ID split](project_sound_request_routing.md) — IDs ≥ 0x8000 → MusicDirector; below → SFX pool
+- [Knowledge base location](reference_knowledge_base.md) — music_theory.md compendium (~5,880 words)
+- [Tempo/key grid convention](project_tempo_key_grid.md) — shared grid across states; multiples of 4 bars
+- [Proximity voice chat audio layer](project_voice_chat_audio_layer.md) — WASAPI capture, VAD, VoiceBus, spatialization, ducking
+- [KB addendum: voice as ensemble](kb_addendum_voice_as_ensemble.md) — 2-4 kHz presence band carve when voice is active

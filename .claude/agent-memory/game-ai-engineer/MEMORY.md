@@ -1,0 +1,4 @@
+- [Nadir authoring rubric location](reference_rubric_location.md) — the canonical Nadir authoring rubric lives in the agent-knowledge tree, not the repo
+- [Weights UBO convention](project_weights_ubo.md) — hot-tunable weights UBO is set=0 binding=7, std140, per editor-mutable plan
+- [Debug scoring exposure](feedback_debug_scoring.md) — per-consideration scores only visible to /inspect-scoring if the shader opts in via debug_pack4
+- [Showcase shader resolution](project_showcase_shader_resolution.md) — showcase scene bare-name shaders resolve through single Nadir scan dir (demo/behaviors); no per-scene override
