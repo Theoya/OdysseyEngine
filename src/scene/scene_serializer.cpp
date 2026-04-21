@@ -89,6 +89,7 @@ static void append_entity(std::ostringstream& out,
                         !desc.script_class.empty() ||
                         !desc.spawn_type.empty() ||
                         !desc.pack_leader.empty() ||
+                        !desc.tags.empty() ||
                         !desc.unknown_children_xml.empty();
     if (!has_children) {
         out << "/>\n";
@@ -148,6 +149,12 @@ static void append_entity(std::ostringstream& out,
     }
     if (!desc.pack_leader.empty()) {
         out << inner << "<pack leader=\"" << desc.pack_leader << "\"/>\n";
+    }
+    // Phase 4: <tag> children. Emit in stored order. Empty-name tags are
+    // still emitted (as `<tag name=""/>`) so an Inspector-added-but-unnamed
+    // row round-trips — the Inspector shows these in red to prompt the user.
+    for (const auto& tag : desc.tags) {
+        out << inner << "<tag name=\"" << tag << "\"/>\n";
     }
     for (const auto& raw : desc.unknown_children_xml) {
         out << inner << raw;

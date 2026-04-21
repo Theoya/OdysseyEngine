@@ -71,6 +71,35 @@ struct EditorState {
     // Zero (default) means "no request this frame".
     uint32_t viewport_requested_width  = 0;
     uint32_t viewport_requested_height = 0;
+
+    // --- Phase 4 additions ---
+    // Root of the asset tree the Asset Browser walks. Defaults to
+    // demo/showcase/ in the Editor ctor; can be swapped at runtime later.
+    std::filesystem::path project_root;
+
+    // Currently-selected asset (Asset Browser click → Inspector preview).
+    // Empty when nothing is selected; when non-empty takes precedence over
+    // the selected-entity inspector body via the Inspector's mode toggle.
+    std::filesystem::path selected_asset;
+
+    // Set by the Asset Browser when the user double-clicks a scene file.
+    // Editor consumes the request between frames — it cannot reload mid-
+    // draw because panels hold bare pointers into EntityManager. Reset to
+    // empty after the Editor handles the swap.
+    std::filesystem::path scene_swap_request;
+
+    // Set by the "Save Scene" menu button / Ctrl+S shortcut / Inspector.
+    // Editor consumes it once per frame, invokes scene_serializer, and
+    // emits a log entry. Reset to false after handling.
+    bool save_requested = false;
+
+    // The SceneData the editor is currently editing (same underlying bytes
+    // as `entities` was populated from; kept here so serialize_scene has
+    // the preserved_source + unknown buckets it needs). The Inspector's
+    // edits write both into `entities->get_entity(...)->components` AND
+    // into the matching `scene_data.entities[i].*` so the reconstruction
+    // path sees the mutation.
+    void* scene_data = nullptr;  // SceneData*, void* to avoid a header cycle
 };
 
 // Pure helper: given an entity pointer, produce a stable display label.

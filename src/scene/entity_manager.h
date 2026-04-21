@@ -18,6 +18,17 @@ struct EntityComponents {
     std::string script_class;
     std::string script_config;
     std::string prefab_source;    // which prefab it came from
+
+    // Proximity-voice audibility radius in meters. Carried here for the
+    // Inspector's "Stats" sub-editor; authoritative source is
+    // SceneData::EntityDesc::voice_range (see scene_loader.h for why voice
+    // does NOT live inside EntityStats — GPU SSBO byte-layout lock).
+    float voice_range = 25.0f;
+
+    // Phase 4: free-text gameplay tags. Authored in scene XML as
+    //   <tag name="..."/>
+    // repeated children on <entity>. Inspector exposes an Add/Remove UI.
+    std::vector<std::string> tags;
 };
 
 // A single entity instance

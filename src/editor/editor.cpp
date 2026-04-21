@@ -4,9 +4,11 @@
 #include "editor/inspector_panel.h"
 #include "editor/viewport_panel.h"
 #include "editor/log_panel.h"
+#include "editor/asset_browser_panel.h"
 #include "editor/scene_viewport_renderer.h"
 
 #include "scene/scene_loader.h"
+#include "scene/scene_serializer.h"
 
 #include <imgui.h>
 #include <imgui_impl_glfw.h>
@@ -24,6 +26,9 @@
 #include <cmath>
 #include <cstdio>
 #include <cstring>
+#include <filesystem>
+#include <fstream>
+#include <sstream>
 #include <string>
 #include <vector>
 
@@ -94,6 +99,12 @@ struct Editor::Impl {
     bool     has_imgui           = false;
 
     scene::EntityManager entities;
+
+    // Phase 4: hold the parsed SceneData in the editor so the Inspector's
+    // edit path can mirror mutations into it (the serializer needs the
+    // preserved-unknown buckets + preserved_source snapshot on save).
+    scene::SceneData scene_data;
+    bool             has_scene_data = false;
 
     // Pointer to the log panel's sink installer (so Editor::initialize can
     // install the sink before the scene-loader starts logging).
@@ -566,6 +577,18 @@ Result<bool> Editor::initialize(const std::filesystem::path& scene_path) {
         }
     }
 
+    // -------- Project root for the Asset Browser (Phase 4) --------
+    // Default to demo/showcase/ — the Asset Browser walks this tree. If a
+    // scene file was passed in, prefer its parent directory as the root so
+    // the browser is scoped to the project the user is editing.
+    if (!scene_path.empty()) {
+        auto parent = scene_path.parent_path();
+        state_.project_root = parent.empty() ? std::filesystem::path("demo/showcase")
+                                             : parent;
+    } else {
+        state_.project_root = std::filesystem::path("demo/showcase");
+    }
+
     // -------- Scene load (non-fatal in Phase 1) --------
     if (!scene_path.empty()) {
         spdlog::info("[editor] loading scene: {}", scene_path.string());
@@ -575,8 +598,10 @@ Result<bool> Editor::initialize(const std::filesystem::path& scene_path) {
                          scene_res.error());
             state_.status_line = "Scene load failed: " + scene_res.error();
         } else {
-            auto scene_data = std::move(scene_res).value();
-            scene::populate_entities(impl_->entities, scene_data);
+            impl_->scene_data = std::move(scene_res).value();
+            impl_->has_scene_data = true;
+            scene::populate_entities(impl_->entities, impl_->scene_data);
+            state_.scene_data = &impl_->scene_data;
             spdlog::info("[editor] scene loaded: {} entities", impl_->entities.entity_count());
             state_.status_line = "Loaded " + scene_path.filename().string() +
                                  " (" + std::to_string(impl_->entities.entity_count()) +
@@ -597,7 +622,78 @@ void Editor::build_panels() {
     panels_.push_back(std::make_unique<SceneTreePanel>());
     panels_.push_back(std::make_unique<InspectorPanel>());
     panels_.push_back(std::make_unique<ViewportPanel>());
+    panels_.push_back(std::make_unique<AssetBrowserPanel>());
     panels_.push_back(std::move(log_panel));
+}
+
+// Phase 4: consume EditorState save/swap requests between frames so we never
+// mutate the EntityManager while a command buffer is in flight and so panels
+// don't have to know about SceneData / SceneLoader directly.
+static void handle_phase4_requests(Editor::Impl& impl, EditorState& state) {
+    // --- Save requested ---
+    if (state.save_requested) {
+        state.save_requested = false;
+        if (!impl.has_scene_data) {
+            spdlog::warn("[editor] save requested but no scene is loaded");
+        } else if (state.scene_path.empty()) {
+            spdlog::warn("[editor] save requested but scene_path is empty");
+        } else if (state.mode != Mode::Edit) {
+            spdlog::warn("[editor] save refused — not in Edit mode (current={})",
+                         std::string{mode_label(state.mode)});
+        } else {
+            auto r = scene::serialize_scene(impl.scene_data, state.scene_path);
+            if (r.is_err()) {
+                spdlog::error("[editor] save failed: {}", r.error());
+                state.status_line = "Save failed: " + r.error();
+            } else {
+                // Best-effort stat the written file for a byte-count toast.
+                std::error_code ec;
+                auto sz = std::filesystem::file_size(state.scene_path, ec);
+                const std::string msg = "Saved " +
+                    state.scene_path.filename().string() + " (" +
+                    (ec ? std::string{"?"} : std::to_string(sz)) + " bytes)";
+                spdlog::info("[editor] {}", msg);
+                state.status_line = msg;
+                // The written file IS now the canonical source. Re-snapshot
+                // it so a subsequent unmutated round-trip still byte-matches.
+                std::ifstream f(state.scene_path,
+                                std::ios::in | std::ios::binary);
+                if (f.is_open()) {
+                    std::ostringstream ss; ss << f.rdbuf();
+                    impl.scene_data.preserved_source = ss.str();
+                    impl.scene_data.mutated = false;
+                }
+            }
+        }
+    }
+
+    // --- Scene swap requested ---
+    if (!state.scene_swap_request.empty()) {
+        auto req = state.scene_swap_request;
+        state.scene_swap_request.clear();
+        if (state.mode != Mode::Edit) {
+            spdlog::warn("[editor] scene swap refused — not in Edit mode");
+        } else {
+            auto r = scene::load_scene_file(req);
+            if (r.is_err()) {
+                spdlog::error("[editor] scene swap load failed: {}", r.error());
+            } else {
+                impl.entities.clear();
+                impl.scene_data = std::move(r).value();
+                impl.has_scene_data = true;
+                scene::populate_entities(impl.entities, impl.scene_data);
+                state.selected_entity = INVALID_ENTITY;
+                state.scene_path = req;
+                state.scene_data = &impl.scene_data;
+                state.selected_asset.clear();
+                spdlog::info("[editor] scene swapped to '{}' ({} entities)",
+                             req.string(), impl.entities.entity_count());
+                state.status_line = "Loaded " + req.filename().string() +
+                                    " (" + std::to_string(impl.entities.entity_count()) +
+                                    " entities)";
+            }
+        }
+    }
 }
 
 void Editor::run() {
@@ -610,7 +706,20 @@ void Editor::run() {
         last = now;
         if (dt > 0.25f) dt = 0.25f;
 
+        // Ctrl+S — the shortcut MUST be polled through ImGui's IO (not GLFW
+        // directly) so that typing Ctrl+S into an InputText still reaches
+        // the active widget and does not trigger a save.
+        {
+            ImGuiIO& io = ImGui::GetIO();
+            if ((io.KeyCtrl || io.KeySuper) && ImGui::IsKeyPressed(ImGuiKey_S, false) &&
+                !io.WantCaptureKeyboard) {
+                state_.save_requested = true;
+            }
+        }
+
         for (auto& p : panels_) p->tick(dt);
+
+        handle_phase4_requests(*impl_, state_);
 
         draw_frame(dt);
     }
@@ -621,6 +730,11 @@ void Editor::draw_menu_bar() {
     if (!ImGui::BeginMainMenuBar()) return;
 
     if (ImGui::BeginMenu("File")) {
+        const bool can_save = impl_->has_scene_data &&
+                              state_.mode == Mode::Edit;
+        if (ImGui::MenuItem("Save Scene", "Ctrl+S", false, can_save)) {
+            state_.save_requested = true;
+        }
         if (ImGui::MenuItem("Reload Scene", "Ctrl+R", false, false)) {}
         ImGui::Separator();
         if (ImGui::MenuItem("Quit", "Alt+F4")) {
@@ -638,8 +752,10 @@ void Editor::draw_menu_bar() {
         ImGui::EndMenu();
     }
     if (ImGui::BeginMenu("Help")) {
-        ImGui::MenuItem("OdysseyEditor — Phase 1", nullptr, false, false);
-        ImGui::MenuItem("Read-only inspector. Phase 2 adds editing.",
+        ImGui::MenuItem("OdysseyEditor — Phase 4", nullptr, false, false);
+        ImGui::MenuItem("Editable inspector + asset browser.",
+                        nullptr, false, false);
+        ImGui::MenuItem("Ctrl+S saves the scene.",
                         nullptr, false, false);
         ImGui::EndMenu();
     }
