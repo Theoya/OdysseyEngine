@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  painted_wood.mat.xml
+  Matte, hand-painted wood. Anti-realism touchstone: deliberately low metallic,
+  high roughness, saturated albedo texture — readable at a glance, not photoreal.
+
+  Uses albedo map only (painted detail lives in the diffuse); a subtle normal
+  map accents plank seams without chasing micro-surface detail.
+-->
+<material name="painted_wood" version="1">
+  <shaders>
+    <vertex   src="shaders/pbr.vert"/>
+    <fragment src="shaders/pbr.frag"/>
+  </shaders>
+  <pbr>
+    <albedo    color="0.62 0.33 0.18 1.0"/>
+    <metallic  value="0.00"/>
+    <roughness value="0.92"/>
+  </pbr>
+  <textures>
+    <albedo src="textures/painted_wood_albedo.ktx2" format="BC7" colorspace="srgb"   mips="true"/>
+    <normal src="textures/painted_wood_normal.ktx2" format="BC5" colorspace="linear" mips="true"/>
+  </textures>
+</material>

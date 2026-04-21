@@ -1,0 +1,189 @@
+// scout.nadir — Showcase archetype: flanker / scout / reporter
+//
+// Design intent:
+//   The scout is the "eyes" of the enemy side. It closes in, but never head-on —
+//   it arcs around to the player's flank, stays at rifle range, and barks comms
+//   signals that (narratively) alert other archetypes. When it takes damage it
+//   breaks contact, falls back toward its ally center, and radios urgency.
+//
+// Silhouette (3 observable beats the player should read):
+//   1. Arcs around cover instead of charging the barrel of the gun.
+//   2. Audibly calls out when it first sees the player and every ~4s after.
+//   3. Drops to flee when health crosses 30% and visibly retreats.
+//
+// Feature coverage demonstrated:
+//   - Weighted scoring across 4 candidate states (patrol / alert / flank / flee)
+//   - Persistent state machine with timer + hysteresis
+//   - Action requests (patrol sequence id=1, report sequence id=3)
+//   - Comms signals (urgency modulated by damage taken)
+//   - Hot-tunable weights UBO (binding=7) — /tune-weights targets this
+//   - Per-consideration debug_pack4 — /inspect-scoring reads this
+
+#include "scoring.glsl"
+#include "steering.glsl"
+#include "spatial.glsl"
+#include "state_machine.glsl"
+#include "blackboard.glsl"
+#include "debug.glsl"
+
+// ─────────────────────────────────────────────────────────────────────
+// Hot-tunable weights UBO (set=0, binding=7, std140).
+// /tune-weights rewrites this buffer at runtime — no shader recompile.
+// Each field has a default and a "feel" note so tuners know what to twist.
+// ─────────────────────────────────────────────────────────────────────
+layout(std140, set = 0, binding = 7) uniform Weights {
+    float w_flank_arc;       // 1.0  — how hard to bias arcing over direct approach. ↑ = wider loops.
+    float w_flee_threshold;  // 0.30 — HP fraction at which flee dominates. ↑ = scout runs sooner.
+    float w_report_cooldown; // 4.0  — seconds between comms barks. ↑ = quieter scout.
+    float w_engage_range;    // 22.0 — preferred standoff radius (units). ↑ = farther out.
+    float w_patrol_speed;    // 0.6  — patrol move_weight multiplier. ↓ = slower, more cautious.
+    float w_alert_gain;      // 1.2  — how quickly proximity escalates to alert. ↑ = jumpier.
+    float w_hysteresis;      // 0.15 — bonus to current state score. ↑ = less state flicker.
+    float _pad_0;
+} W;
+
+void main() {
+    uint idx = gl_GlobalInvocationID.x;
+    if (idx >= total_entities) return;
+
+    // ── Read state ─────────────────────────────────────────────────
+    vec3  pos        = positions[idx].xyz;
+    float hp         = stats[idx].health;
+    float max_hp     = stats[idx].max_health;
+    float spd        = stats[idx].speed;
+    vec3  player_pos = player_position.xyz;
+    float dt         = delta_time;
+
+    uint  state       = persist[idx].current_state;
+    float state_timer = persist[idx].state_timer + dt;
+    float report_cd   = cooldown_tick(persist[idx].cooldown_0, dt); // comms cooldown
+    float patrol_cd   = cooldown_tick(persist[idx].cooldown_1, dt); // re-request patrol
+
+    // ── Considerations (each is a 0..1 normalized signal) ──────────
+    float health_n  = score_health(hp, max_hp);                   // 1=full, 0=dead
+    float damage_n  = 1.0 - health_n;                             // 1=hurt
+    float dist      = distance_to(pos, player_pos);
+    float proximity = score_proximity(dist, 50.0);                // 1=adjacent, 0=50+units
+    float in_range  = bell_curve(dist, W.w_engage_range, 8.0);    // peaks at engage range
+
+    // Flee trigger: damage above (1 - flee_threshold). e.g. threshold 0.30 → flees at 70% damage.
+    float flee_signal = smooth_threshold(damage_n, 1.0 - W.w_flee_threshold, 0.08);
+
+    // ── Score four candidate states ────────────────────────────────
+    //   patrol — idle, walking routes. Fallback when nothing is going on.
+    //   alert  — player nearby but not yet close; scout closes the gap.
+    //   flank  — player at engage range; scout arcs and calls out.
+    //   flee   — scout is hurt; break contact.
+    float s_patrol = (1.0 - proximity) * 0.6
+                     + hysteresis_bonus(state, STATE_PATROL, W.w_hysteresis);
+
+    float s_alert  = proximity * (1.0 - in_range) * W.w_alert_gain
+                     + hysteresis_bonus(state, STATE_ALERT, W.w_hysteresis);
+
+    float s_flank  = in_range * health_n * W.w_flank_arc
+                     + hysteresis_bonus(state, STATE_COMBAT, W.w_hysteresis);
+
+    float s_flee   = flee_signal * (0.8 + proximity * 0.2)
+                     + hysteresis_bonus(state, STATE_FLEE, W.w_hysteresis);
+
+    // ── State transition (pick winner over 0.25 threshold) ─────────
+    float best = score_max4(s_patrol, s_alert, s_flank, s_flee);
+    uint new_state = state;
+    if (best > 0.25) {
+        if      (s_flee  == best) new_state = STATE_FLEE;
+        else if (s_flank == best) new_state = STATE_COMBAT;  // flank reuses COMBAT slot
+        else if (s_alert == best) new_state = STATE_ALERT;
+        else                      new_state = STATE_PATROL;
+    }
+    if (new_state != state) state_timer = 0.0;
+
+    // ── Home position lazy-init (first tick captures spawn pos) ───
+    vec3 home = bb_recall_home_pos(idx);
+    if (length(home) < 0.001) { home = pos; bb_store_home_pos(idx, pos); }
+
+    // ── Movement vectors per state ─────────────────────────────────
+    vec3 to_player = direction_to(pos, player_pos);
+
+    // Patrol: gentle arrive back to home so idle scouts don't drift away.
+    vec3 patrol_mv = steer_arrive(pos, home, spd * W.w_patrol_speed, 6.0);
+
+    // Alert: close to engage range head-on (no arc yet — we want the
+    // telegraph of "I see you, I'm coming" before the flank commits).
+    vec3 alert_target = player_pos - to_player * W.w_engage_range;
+    vec3 alert_mv     = steer_arrive(pos, alert_target, spd, 8.0);
+
+    // Flank: arc around the player. Tangent = perpendicular to to_player
+    // in the ground plane. Sign alternates by entity index so half the
+    // scouts go left and half go right (emergent pincer).
+    vec3 tangent = normalize(cross(to_player, vec3(0.0, 1.0, 0.0)));
+    float arc_sign = (float(idx & 1u) - 0.5) * 2.0;          // ±1
+    vec3 flank_target = player_pos
+                      - to_player * W.w_engage_range
+                      + tangent * arc_sign * 10.0;
+    vec3 flank_mv = steer_arrive(pos, flank_target, spd, 4.0);
+
+    // Flee: run away from player, biased toward home (ally center stand-in).
+    vec3 flee_mv = steer_flee(pos, player_pos, spd) * 0.7
+                 + steer_seek(pos, home, spd) * 0.3;
+
+    // ── Blend by state (branchless via equality-mask weights) ──────
+    float wP = float(new_state == STATE_PATROL);
+    float wA = float(new_state == STATE_ALERT);
+    float wF = float(new_state == STATE_COMBAT); // flank
+    float wE = float(new_state == STATE_FLEE);
+
+    vec3 move_vec = patrol_mv * wP + alert_mv * wA + flank_mv * wF + flee_mv * wE;
+
+    float move_len = length(move_vec);
+    if (move_len > spd) move_vec = (move_vec / move_len) * spd;
+
+    // ── Comms: bark on entering alert/flank, and periodically while engaged ──
+    float report_w = 0.0;
+    bool newly_engaged = (new_state != state) && (new_state == STATE_ALERT || new_state == STATE_COMBAT);
+    bool periodic      = (new_state == STATE_COMBAT) && cooldown_is_ready(report_cd);
+    if (newly_engaged || periodic) {
+        report_w = 0.5 + damage_n * 0.5;            // urgency rises as we get hurt
+        report_cd = cooldown_start(W.w_report_cooldown);
+    }
+
+    // ── Action requests (consumed by .actions.xml via ActionSystem) ──
+    // 1 = patrol_route    (scout_patrol.actions.xml)
+    // 3 = report_contact  (taunt-equivalent, "hostile spotted" bark)
+    uint  action_req = 0u;
+    float action_pri = 0.0;
+
+    if (new_state == STATE_PATROL && state_timer > 2.0 && cooldown_is_ready(patrol_cd)) {
+        action_req = 1u;
+        action_pri = 0.3;
+        patrol_cd  = cooldown_start(8.0);           // don't re-request patrol for 8s
+    }
+    if (newly_engaged) {
+        action_req = 3u;                            // override patrol — contact report wins
+        action_pri = 0.8;
+    }
+
+    // ── Write outputs ──────────────────────────────────────────────
+    outputs[idx].move_vector     = vec4(move_vec, max(wA, max(wF, wE)) + wP * 0.5);
+    outputs[idx].attack_target   = vec4(player_pos, wF * in_range * health_n);
+    outputs[idx].animation_id    = new_state;
+    outputs[idx].animation_blend = clamp(move_len / max(spd, 0.001), 0.0, 1.0);
+    outputs[idx].sound_event     = (report_w > 0.3) ? 10u : 0u;   // 10 = scout_report bark
+    outputs[idx].sound_priority  = report_w;
+    outputs[idx].comms_signal    = report_w;
+    outputs[idx].comms_urgency   = damage_n;                      // hurt scouts sound panicked
+    outputs[idx].action_request  = action_req;
+    outputs[idx].action_priority = action_pri;
+
+    // ── Persist ────────────────────────────────────────────────────
+    persist[idx].current_state = new_state;
+    persist[idx].state_timer   = state_timer;
+    persist[idx].cooldown_0    = report_cd;
+    persist[idx].cooldown_1    = patrol_cd;
+    persist[idx].last_decision = new_state;
+
+    // ── Debug: pack the 4 state scores so /inspect-scoring can read them.
+    //   R = patrol, G = alert, B = flank, A = flee.
+    //   A dead shader → all zero. A stuck shader → values never change.
+    //   Identical values across entities → persist/position buffer not read.
+    debug_pack4(idx, s_patrol, s_alert, s_flank, s_flee);
+}

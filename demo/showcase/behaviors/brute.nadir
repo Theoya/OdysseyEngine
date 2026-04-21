@@ -1,0 +1,229 @@
+// brute.nadir — Showcase archetype: telegraphed heavy / charger / stagger-victim
+//
+// Design intent:
+//   The brute is the "weight" of the enemy line. Slow to commit, devastating
+//   when it lands. Every attack is telegraphed: a 0.5s wind-up roar followed
+//   by a 0.8s charge. If shot during wind-up or charge it staggers — a visible
+//   reaction window the player is meant to read and exploit.
+//
+// Silhouette:
+//   1. Stands, roars, telegraphs → charges in a straight line.
+//   2. Staggers on damage during commit window (clearly different animation).
+//   3. Long recovery after a missed charge — a free attack window for the player.
+//
+// Feature coverage demonstrated:
+//   - State machine with committed-action substates (WINDUP, CHARGE, RECOVERY)
+//     stored in persist.current_state, timed via state_timer.
+//   - Action request 2 = roar (audible telegraph, .actions.xml sequence).
+//   - Hot-tunable aggression weight — dragging it up makes brutes commit sooner.
+//   - debug_pack4 exposes windup timer, charge timer, aggression score, stagger.
+
+#include "scoring.glsl"
+#include "steering.glsl"
+#include "spatial.glsl"
+#include "state_machine.glsl"
+#include "blackboard.glsl"
+#include "debug.glsl"
+
+// Substate encoding — we reuse the common state enum but also
+// carry sub-phase in memory_0.x so we can resolve WINDUP/CHARGE/RECOVERY
+// without adding new state constants (keeps animation_id mapping clean).
+const float SUB_IDLE     = 0.0;
+const float SUB_WINDUP   = 1.0;
+const float SUB_CHARGE   = 2.0;
+const float SUB_RECOVERY = 3.0;
+
+layout(std140, set = 0, binding = 7) uniform Weights {
+    float w_aggression;      // 1.0  — master aggression gain. ↑ = commits to charge sooner.
+    float w_windup_time;     // 0.5  — telegraph duration (sec). ↑ = more readable, easier.
+    float w_charge_time;     // 0.8  — charge commit duration (sec). ↑ = longer vulnerable window.
+    float w_recovery_time;   // 1.2  — post-charge punish window (sec). ↑ = more forgiving.
+    float w_charge_range;    // 18.0 — max range to initiate a charge (units).
+    float w_stagger_hp_pct;  // 0.15 — HP fraction loss per tick that triggers stagger.
+    float w_hysteresis;      // 0.20 — state stickiness.
+    float _pad_0;
+} W;
+
+void main() {
+    uint idx = gl_GlobalInvocationID.x;
+    if (idx >= total_entities) return;
+
+    vec3  pos        = positions[idx].xyz;
+    float hp         = stats[idx].health;
+    float max_hp     = stats[idx].max_health;
+    float spd        = stats[idx].speed;
+    vec3  player_pos = player_position.xyz;
+    float dt         = delta_time;
+
+    uint  state       = persist[idx].current_state;
+    float state_timer = persist[idx].state_timer + dt;
+    float phase_timer = persist[idx].cooldown_0; // sub-phase clock (counts up)
+    float roar_cd     = persist[idx].cooldown_1; // roar re-request guard
+
+    // Blackboard: sub-phase in memory_0.x, last-seen HP in memory_0.y
+    float sub       = bb_read_float(idx, 0u);
+    float last_hp   = bb_read_float(idx, 1u);
+    if (last_hp < 0.001) last_hp = hp;  // lazy init
+
+    // Damage-this-tick signal (used to trigger stagger)
+    float hp_drop    = max(0.0, last_hp - hp);
+    float hp_drop_n  = hp_drop / max(max_hp, 0.001);
+    bool  got_hit    = hp_drop_n > W.w_stagger_hp_pct;
+
+    // Considerations
+    float health_n  = score_health(hp, max_hp);
+    float damage_n  = 1.0 - health_n;
+    float dist      = distance_to(pos, player_pos);
+    float proximity = score_proximity(dist, 50.0);
+    float in_charge_range = smooth_threshold(W.w_charge_range - dist, 2.0, 1.5);
+
+    // Aggression: how hard the brute wants to commit this tick.
+    // Scales with proximity, inverse health (cornered = angrier) and tuning.
+    float aggression = proximity * (0.5 + damage_n * 0.5) * W.w_aggression;
+
+    // ── State scoring (coarse macro-states) ────────────────────────
+    //   PATROL — nothing to do
+    //   ALERT  — lumbering walk toward player, not yet committing
+    //   COMBAT — in charge range, running the commit-substate machine
+    float s_patrol = (1.0 - proximity) * 0.5
+                     + hysteresis_bonus(state, STATE_PATROL, W.w_hysteresis);
+    float s_alert  = proximity * (1.0 - in_charge_range) * 0.9
+                     + hysteresis_bonus(state, STATE_ALERT, W.w_hysteresis);
+    float s_combat = in_charge_range * aggression
+                     + hysteresis_bonus(state, STATE_COMBAT, W.w_hysteresis);
+
+    // During active commit substates, lock state to COMBAT so the brute
+    // doesn't abandon a charge mid-telegraph just because proximity changed.
+    bool committed = (sub == SUB_WINDUP) || (sub == SUB_CHARGE) || (sub == SUB_RECOVERY);
+
+    uint new_state = state;
+    if (committed) {
+        new_state = STATE_COMBAT;
+    } else {
+        float best = score_max3(s_patrol, s_alert, s_combat);
+        if (best > 0.25) {
+            if      (s_combat >= best) new_state = STATE_COMBAT;
+            else if (s_alert  >= best) new_state = STATE_ALERT;
+            else                       new_state = STATE_PATROL;
+        }
+    }
+    if (new_state != state) state_timer = 0.0;
+
+    // ── Commit substate machine ────────────────────────────────────
+    //   SUB_IDLE     → SUB_WINDUP   when in COMBAT + in range
+    //   SUB_WINDUP   → SUB_CHARGE   after w_windup_time
+    //   SUB_CHARGE   → SUB_RECOVERY after w_charge_time
+    //   SUB_RECOVERY → SUB_IDLE     after w_recovery_time
+    //   any substate → SUB_RECOVERY if got_hit (stagger interrupt)
+    float new_sub  = sub;
+    float new_phase_timer = phase_timer + dt;
+
+    // Stagger: damage interrupts wind-up or charge, skipping to recovery.
+    // Recovery itself is not re-staggerable (would feel cheap).
+    if (got_hit && (sub == SUB_WINDUP || sub == SUB_CHARGE)) {
+        new_sub         = SUB_RECOVERY;
+        new_phase_timer = 0.0;
+    } else if (sub == SUB_IDLE && new_state == STATE_COMBAT && in_charge_range > 0.5) {
+        new_sub         = SUB_WINDUP;
+        new_phase_timer = 0.0;
+    } else if (sub == SUB_WINDUP && new_phase_timer >= W.w_windup_time) {
+        new_sub         = SUB_CHARGE;
+        new_phase_timer = 0.0;
+    } else if (sub == SUB_CHARGE && new_phase_timer >= W.w_charge_time) {
+        new_sub         = SUB_RECOVERY;
+        new_phase_timer = 0.0;
+    } else if (sub == SUB_RECOVERY && new_phase_timer >= W.w_recovery_time) {
+        new_sub         = SUB_IDLE;
+        new_phase_timer = 0.0;
+    }
+
+    // ── Movement per (state, substate) ─────────────────────────────
+    vec3 to_player = direction_to(pos, player_pos);
+
+    // Patrol: idle in place (brutes are sedentary until roused).
+    vec3 patrol_mv = vec3(0.0);
+
+    // Alert: lumber toward player at half speed.
+    vec3 alert_mv = steer_seek(pos, player_pos, spd * 0.5);
+
+    // Windup: rooted, facing player (move_weight=0 so rotation-only apply).
+    vec3 windup_mv = vec3(0.0);
+
+    // Charge: full speed straight-line commit. Note: committed to the
+    // direction sampled when charge started (stored in memory_0.zw on entry).
+    vec3 charge_dir = bb_read_vec3(idx, 4u); // stored in home-pos slots (4-6) — repurposed
+    if (new_sub == SUB_CHARGE && sub != SUB_CHARGE) {
+        charge_dir = to_player;                       // snapshot direction at commit
+        bb_write_vec3(idx, 4u, charge_dir);
+    }
+    vec3 charge_mv = charge_dir * spd * 1.4;          // charge is faster than walk
+
+    // Recovery: no movement, brute is winded.
+    vec3 recovery_mv = vec3(0.0);
+
+    // Blend by macro-state first, then override with substate if committed.
+    vec3 base_mv = patrol_mv * float(new_state == STATE_PATROL)
+                 + alert_mv  * float(new_state == STATE_ALERT)
+                 + vec3(0.0) * float(new_state == STATE_COMBAT && new_sub == SUB_IDLE);
+
+    vec3 sub_mv = windup_mv   * float(new_sub == SUB_WINDUP)
+                + charge_mv   * float(new_sub == SUB_CHARGE)
+                + recovery_mv * float(new_sub == SUB_RECOVERY);
+
+    vec3 move_vec = (new_sub == SUB_IDLE) ? base_mv : sub_mv;
+
+    float mlen = length(move_vec);
+    if (mlen > spd * 1.5) move_vec = (move_vec / mlen) * spd * 1.5;
+
+    // ── Attack: the damaging frame is the first tick of SUB_CHARGE.
+    //   The player gets W.w_windup_time warning before this.
+    float attack_w = 0.0;
+    if (new_sub == SUB_CHARGE && sub != SUB_CHARGE) {
+        attack_w = 1.0;
+    }
+
+    // ── Action request: roar on wind-up start (tells audio system to play
+    //   the heavy roar SFX via the .actions.xml sequence).
+    uint  action_req = 0u;
+    float action_pri = 0.0;
+    float new_roar_cd = cooldown_tick(roar_cd, dt);
+    if (new_sub == SUB_WINDUP && sub != SUB_WINDUP && cooldown_is_ready(new_roar_cd)) {
+        action_req  = 2u;                             // 2 = roar sequence
+        action_pri  = 0.9;
+        new_roar_cd = cooldown_start(3.0);            // min 3s between roars
+    }
+
+    // ── Write outputs ──────────────────────────────────────────────
+    // Note: we expose substate in animation_id's low bits by offsetting
+    // so the CPU animation mapper can distinguish windup/charge/recovery
+    // from plain COMBAT. The scene-side mapping: 100+sub → brute-specific clip.
+    uint anim_id = new_state;
+    if (new_sub == SUB_WINDUP)   anim_id = 100u;
+    if (new_sub == SUB_CHARGE)   anim_id = 101u;
+    if (new_sub == SUB_RECOVERY) anim_id = 102u;
+
+    outputs[idx].move_vector     = vec4(move_vec, float(mlen > 0.001));
+    outputs[idx].attack_target   = vec4(player_pos, attack_w);
+    outputs[idx].animation_id    = anim_id;
+    outputs[idx].animation_blend = clamp(mlen / max(spd * 1.5, 0.001), 0.0, 1.0);
+    outputs[idx].sound_event     = (action_req == 2u) ? 20u : 0u;     // 20 = brute_roar
+    outputs[idx].sound_priority  = action_pri;
+    outputs[idx].comms_signal    = attack_w * 0.6;                    // charge telegraph comms
+    outputs[idx].comms_urgency   = aggression;
+    outputs[idx].action_request  = action_req;
+    outputs[idx].action_priority = action_pri;
+
+    // ── Persist ────────────────────────────────────────────────────
+    persist[idx].current_state = new_state;
+    persist[idx].state_timer   = state_timer;
+    persist[idx].cooldown_0    = new_phase_timer;
+    persist[idx].cooldown_1    = new_roar_cd;
+    persist[idx].last_decision = new_state;
+    bb_write_float(idx, 0u, new_sub);
+    bb_write_float(idx, 1u, hp);                                      // remember HP for next tick
+
+    // ── Debug: windup clock, charge clock, aggression, got-hit flag.
+    float windup_clock = (new_sub == SUB_WINDUP) ? new_phase_timer : 0.0;
+    float charge_clock = (new_sub == SUB_CHARGE) ? new_phase_timer : 0.0;
+    debug_pack4(idx, windup_clock, charge_clock, aggression, got_hit ? 1.0 : 0.0);
+}

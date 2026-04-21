@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Liminal — East Lab zone (and fallback startup profile).
+  Reference (kb §4): Kane Pixels "Backrooms", Control (the Oldest House),
+  Evangelion NERV corridors, CRT-era office horror.
+  Read: uncanny flatness, fluorescent green-cyan tint, absence of strong
+  shadows. CRT pass (engine-owned) already gives scanline texture — this
+  profile leans into it with a flat ambient and a very slight mains-hum flicker
+  on the fluorescents. No god rays, no volumetrics — Liminal disowns depth.
+-->
+<lighting_profile preset="Liminal" version="1">
+  <palette>
+    <primary_kelvin min="3800" max="4400"/>
+    <secondary_kelvin min="6000" max="7000"/>
+    <saturation_max value="0.40"/>
+    <contrast_ratio key_to_fill="2:1" key_to_back="1.5:1"/>
+  </palette>
+
+  <fog type="exponential" density="0.008" color_kelvin="4000"/>
+  <volumetrics enabled="0" god_rays="0" density_variance="0" steps="0"/>
+
+  <directional_override kelvin="6500" intensity="0.3" direction="0 -1 0"/>
+
+  <post_fx>
+    <tonemap  curve="aces" exposure="1.00"/>
+    <bloom    threshold="1.8" intensity="0.25" radius="0.25"/>
+    <grade    lift="0.00 0.02 0.00" gamma="1.00 1.00 1.00" gain="0.96 1.02 0.98"/>
+    <vignette strength="0.06" roundness="1.5"/>
+    <grain    intensity="0.05" response="0.6"/>
+  </post_fx>
+
+  <disallowed_sources>
+    <kelvin_below value="2500"/>
+    <kelvin_above value="9000"/>
+    <band min="1800" max="3000" reason="Liminal refuses warm-domestic sources — they break the uncanny register"/>
+  </disallowed_sources>
+</lighting_profile>

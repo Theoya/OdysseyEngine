@@ -1,0 +1,168 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  showcase.scene.xml
+  The single canonical scene that exercises every OdysseyEngine subsystem.
+
+  This file is the round-trip acceptance target: loading it and serializing it
+  back with scene_serializer MUST produce byte-identical output. Comments below,
+  attribute ordering, and intentionally-unknown attributes (e.g. on <entity> and
+  <light>) must all survive the round trip.
+
+  Feature matrix coverage:
+    - Entities with count + <spawn_region> for batch spawning (AI).
+    - Per-entity <mesh>, <behavior>, <script>, <pack>, <stats> exercise each
+      EntityType branch in scene.xsd.
+    - Lights-stub, audio-stub, music-director-stub, lighting-profile-stub are
+      all intentionally present as child elements with namespaced attributes
+      the base scene.xsd does not (yet) know about. They are here so:
+        (a) the editor / serializer exercises its "preserve unknowns" path,
+        (b) downstream agents (lighting, audio) can fill them in without a
+            schema-bump dance.
+-->
+<scene name="showcase" version="1" lighting_profile="liminal" audio_bank="showcase_bank">
+  <world>
+    <time_scale>1.0</time_scale>
+    <gravity>0 -9.81 0</gravity>
+  </world>
+
+  <!-- ─────────────────────────────────────────────────────────────────────
+       STATIC GEOMETRY — meshes + materials, one of each showcase material.
+  ──────────────────────────────────────────────────────────────────────── -->
+
+  <!-- Arena floor: ground plane with mesh collider. Uses stone_wall for tone. -->
+  <entity id="arena_floor" archetype="static">
+    <transform position="0 0 0" rotation="0 0 0 1" scale="1 1 1"/>
+    <mesh src="demo/showcase/meshes/arena_floor.mesh.xml"/>
+  </entity>
+
+  <!-- Stone-wall perimeter: four walls, full-PBR material. -->
+  <entity id="wall_north" archetype="static">
+    <transform position="0 2.5 50" scale="100 5 1"/>
+    <mesh src="demo/showcase/meshes/pillar.mesh.xml"/>
+  </entity>
+  <entity id="wall_south" archetype="static">
+    <transform position="0 2.5 -50" scale="100 5 1"/>
+    <mesh src="demo/showcase/meshes/pillar.mesh.xml"/>
+  </entity>
+  <entity id="wall_east" archetype="static">
+    <transform position="50 2.5 0" scale="1 5 100"/>
+    <mesh src="demo/showcase/meshes/pillar.mesh.xml"/>
+  </entity>
+  <entity id="wall_west" archetype="static">
+    <transform position="-50 2.5 0" scale="1 5 100"/>
+    <mesh src="demo/showcase/meshes/pillar.mesh.xml"/>
+  </entity>
+
+  <!-- Gold-leaf pillar: high-metal contrast piece in the arena centre. -->
+  <entity id="gold_pillar_center" archetype="static" material_override="demo/showcase/materials/gold_leaf.mat.xml">
+    <transform position="0 1.5 0" rotation="0 0 0 1" scale="1 1 1"/>
+    <mesh src="demo/showcase/meshes/pillar.mesh.xml"/>
+  </entity>
+
+  <!-- Painted-wood crates: anti-realism touchstone.  Three hand-placed. -->
+  <entity id="wood_crate_a" archetype="static" material_override="demo/showcase/materials/painted_wood.mat.xml">
+    <transform position="6 0.75 4"/>
+    <mesh src="demo/showcase/meshes/crate.mesh.xml"/>
+  </entity>
+  <entity id="wood_crate_b" archetype="static" material_override="demo/showcase/materials/painted_wood.mat.xml">
+    <transform position="-6 0.75 4"/>
+    <mesh src="demo/showcase/meshes/crate.mesh.xml"/>
+  </entity>
+  <entity id="wood_crate_c" archetype="static" material_override="demo/showcase/materials/painted_wood.mat.xml">
+    <transform position="0 0.75 -6"/>
+    <mesh src="demo/showcase/meshes/crate.mesh.xml"/>
+  </entity>
+
+  <!-- ─────────────────────────────────────────────────────────────────────
+       PLAYER — single entity, scripted input, no GPU behavior.
+  ──────────────────────────────────────────────────────────────────────── -->
+  <entity id="player_1" archetype="player">
+    <transform position="0 1 25" rotation="0 0 0 1" scale="1 1 1"/>
+    <stats health="150" max_health="150" ammo="60" stamina="100"/>
+    <behavior shader="player_input.nadir"/>
+    <script class="PlayerController"/>
+  </entity>
+
+  <!-- ─────────────────────────────────────────────────────────────────────
+       ENEMY SQUADS — exercise archetype counts + spawn_regions + packs.
+  ──────────────────────────────────────────────────────────────────────── -->
+
+  <!-- Pack of 8 hunters on the left flank; leader_id drives pack cohesion. -->
+  <spawn_region name="hunters_left_region" position="-20 0 10" radius="6">
+    <entity id="hunters_left" archetype="enemy_pack_hunter" count="8">
+      <transform rotation="0 0 0 1"/>
+      <stats health="60" max_health="60" ammo="30" speed="7.0"/>
+      <behavior shader="enemy_pack_hunter.nadir"/>
+      <pack leader="hunters_left"/>
+    </entity>
+  </spawn_region>
+
+  <!-- Mirror pack on the right flank. -->
+  <spawn_region name="hunters_right_region" position="20 0 10" radius="6">
+    <entity id="hunters_right" archetype="enemy_pack_hunter" count="8">
+      <transform rotation="0 0 0 1"/>
+      <stats health="60" max_health="60" ammo="30" speed="7.0"/>
+      <behavior shader="enemy_pack_hunter.nadir"/>
+      <pack leader="hunters_right"/>
+    </entity>
+  </spawn_region>
+
+  <!-- Elevated ranged snipers. -->
+  <spawn_region name="snipers_region" position="0 5 -20" radius="12">
+    <entity id="snipers" archetype="enemy_ranged" count="4">
+      <stats health="40" max_health="40" ammo="50" speed="3.0"/>
+      <behavior shader="enemy_ranged.nadir"/>
+    </entity>
+  </spawn_region>
+
+  <!-- Multi-armed boss gunner at the far end of the arena. -->
+  <entity id="boss_gunner" archetype="multi_arm_gunner">
+    <transform position="0 1 -35" rotation="0 0 0 1" scale="1.5 1.5 1.5"/>
+    <stats health="500" max_health="500" ammo="200" speed="4.0"/>
+    <behavior shader="multi_arm_gunner.nadir"/>
+  </entity>
+
+  <!-- Civilians flee combat — fills the arena space with motion. -->
+  <spawn_region name="civilian_region" position="0 0 0" radius="20">
+    <entity id="civilians" archetype="civilian" count="12">
+      <stats health="30" max_health="30" speed="5.0"/>
+      <behavior shader="civilian_fleeing.nadir"/>
+    </entity>
+  </spawn_region>
+
+  <!-- ─────────────────────────────────────────────────────────────────────
+       LIGHTING STUBS — filled in by lighting-mood-architect via /add-light.
+       These nodes use unknown-to-scene.xsd attributes on purpose so the
+       serializer "preserve unknowns" path is under test.
+  ──────────────────────────────────────────────────────────────────────── -->
+  <entity id="sun" archetype="light" light_type="directional" direction="-0.3 -1 -0.5" kelvin="5500" intensity="3.0">
+    <transform position="0 50 0"/>
+  </entity>
+  <entity id="torch_north" archetype="light" light_type="point" kelvin="1900" intensity="8.0" range="15" flicker_amp="0.15" flicker_hz="6">
+    <transform position="0 3 40"/>
+  </entity>
+  <entity id="flashlight" archetype="light" light_type="spot" kelvin="4200" intensity="12.0" range="25" cone_inner="18" cone_outer="32">
+    <transform position="0 1.7 25"/>
+  </entity>
+
+  <!-- ─────────────────────────────────────────────────────────────────────
+       AUDIO STUBS — scene-scoped cues + music-director reference.
+       Filled in by marty-odonnell-composer.
+  ──────────────────────────────────────────────────────────────────────── -->
+  <entity id="music_director" archetype="system" music_state_machine="demo/showcase/music/showcase.music.xml" initial_state="explore">
+    <script class="MusicDirector"/>
+  </entity>
+  <entity id="ambient_bed" archetype="audio_source" bus="ambience" loop="true" src="demo/showcase/music/stems/arena_ambience.ogg" volume="0.6">
+    <transform position="0 1 0"/>
+  </entity>
+
+  <!-- ─────────────────────────────────────────────────────────────────────
+       GAME SYSTEMS — scripts only.
+  ──────────────────────────────────────────────────────────────────────── -->
+  <entity id="game_system" archetype="system">
+    <script class="GameManager"/>
+    <script class="HUD"/>
+    <script class="PatrolScript" config="demo/showcase/actions/patrol.actions.xml"/>
+  </entity>
+
+</scene>

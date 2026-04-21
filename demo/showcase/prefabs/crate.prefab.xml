@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Showcase crate
+  --------------
+  Exercises the phase-4 first-principles rigid-body path: mass, restitution,
+  friction, linear/angular damping. The visible component block below is what
+  the current prefab.xsd accepts; the <rigidbody .../> element ships with
+  phase-4 schema-add. Until then the intended RigidBody wiring is pinned in
+  this authoring comment so /rigidbody-add knows exactly what to emit when
+  it round-trips the file through the editor serializer.
+
+  phase-4 target block (do NOT uncomment until schema-add extends prefab.xsd):
+
+    <rigidbody mass="25.0"
+               friction="0.55"
+               restitution="0.20"
+               linear_damping="0.05"
+               angular_damping="0.15"
+               kinematic="false"/>
+-->
+<prefab name="crate" version="1">
+  <components>
+    <transform scale="1 1 1"/>
+    <stats health="40" max_health="40" speed="0"/>
+    <render mesh="demo/showcase/meshes/crate.mesh.xml"
+            material="demo/showcase/materials/crate.mat.xml"/>
+    <collider type="box" radius="0.5" height="1.0"/>
+  </components>
+</prefab>

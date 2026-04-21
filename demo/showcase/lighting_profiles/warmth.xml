@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Warmth — SW Hearth zone.
+  Reference (kb §4): Studio Ghibli interiors (Howl's castle, Totoro farmhouse),
+  Dark Souls bonfires, Stardew Valley cabin at night, Wes Anderson honey LUTs
+  (but pulled back from stylized — we want hearth, not tableau).
+  Read: safety, low-contrast, honey midtones. Hearth is the sole narratively-
+  motivated source; tungsten lanterns anchor the space. Sun is reduced so it
+  does not fight the fire.
+-->
+<lighting_profile preset="Warmth" version="1">
+  <palette>
+    <primary_kelvin min="1800" max="2700"/>
+    <secondary_kelvin min="2700" max="3400"/>
+    <saturation_max value="0.55"/>
+    <contrast_ratio key_to_fill="2:1" key_to_back="1.5:1"/>
+  </palette>
+
+  <fog type="exponential_height" density="0.025" color_kelvin="2700" height="6"/>
+  <volumetrics enabled="1" god_rays="0" density_variance="0.15" steps="24"/>
+
+  <directional_override kelvin="3200" intensity="1.2" direction="-0.3 -0.8 -0.2"/>
+
+  <post_fx>
+    <tonemap  curve="aces" exposure="1.00"/>
+    <bloom    threshold="1.3" intensity="0.45" radius="0.50"/>
+    <grade    lift="0.04 0.02 -0.01" gamma="1.00 1.00 1.01" gain="1.06 1.01 0.94"/>
+    <vignette strength="0.20" roundness="1.2"/>
+    <grain    intensity="0.03" response="0.7"/>
+  </post_fx>
+
+  <disallowed_sources>
+    <kelvin_below value="1500"/>
+    <kelvin_above value="5000"/>
+    <band min="4500" max="5000" reason="Warmth refuses neutral daylight in the fill — it must lean honey"/>
+  </disallowed_sources>
+</lighting_profile>

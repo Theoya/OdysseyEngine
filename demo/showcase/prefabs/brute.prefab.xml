@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  brute.prefab.xml
+  Showcase archetype: telegraphed heavy charger.
+  Hot-tunable aggression weight is bound at runtime via /tune-weights brute w_aggression=<v>.
+-->
+<prefab name="brute" version="1">
+  <components>
+    <transform/>
+    <stats health="180" max_health="180" ammo="0" stamina="140" speed="4.0"/>
+    <behavior shader="showcase/behaviors/brute.nadir"
+              actions="showcase/actions/brute_roar.actions.xml"/>
+    <render mesh="showcase/meshes/brute_body.mesh.xml"
+            material="showcase/materials/brute.mat.xml"/>
+    <skeleton source="demo/fps_humanoid/assets/humanoid.skeleton.xml"/>
+    <animations>
+      <!-- Macro state clips -->
+      <clip state="IDLE"   source="demo/fps_humanoid/assets/idle.anim.xml"/>
+      <clip state="PATROL" source="demo/fps_humanoid/assets/idle.anim.xml"/>
+      <clip state="ALERT"  source="demo/fps_humanoid/assets/walk_cycle.anim.xml"/>
+      <clip state="COMBAT" source="demo/fps_humanoid/assets/idle.anim.xml"/>
+      <!-- Substate clips (animation_id 100/101/102 from brute.nadir) -->
+      <clip id="100" name="brute_windup"   source="demo/fps_humanoid/assets/idle.anim.xml"/>
+      <clip id="101" name="brute_charge"   source="demo/fps_humanoid/assets/walk_cycle.anim.xml"/>
+      <clip id="102" name="brute_recovery" source="demo/fps_humanoid/assets/idle.anim.xml"/>
+    </animations>
+    <collider type="capsule" radius="0.7" height="2.1"/>
+    <ai_state initial="PATROL"/>
+    <leitmotif theme="brute_motif" instrument="low_brass_ostinato"/>
+  </components>
+</prefab>

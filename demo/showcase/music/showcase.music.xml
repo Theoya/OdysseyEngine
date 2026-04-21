@@ -1,0 +1,272 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  showcase.music.xml — OdysseyEngine showcase demo music state machine
+  Composer: Marty O'Donnell (reincarnated)
+
+  House conventions (see agent-memory/marty-odonnell-composer/project_tempo_key_grid.md):
+    * BPM drawn from {54, 60, 72, 80, 90, 96, 108, 120, 128, 140}
+    * Bar lengths are multiples of 4 (prefer 8 or 16)
+    * Neighboring states related by P4/P5/relative-major-minor (tritone only via composed bridge)
+    * Modal defaults: Dorian (agency), Aeolian (loss), Phrygian (enemy), Lydian (awe), Locrian (dread-interior)
+
+  Shared tempo relationships:
+    explore  72 BPM  A_aeolian  16 bars  (exploration — slow pulse)
+    combat  128 BPM  D_phrygian  8 bars  (combat — doubled pulse, 72→144 is close to 128; phrases align every 8 bars)
+    victory  96 BPM  A_major    8 bars  (tierce de Picardie from A_aeolian — parallel major, plagal tail)
+    dread    54 BPM  C_locrian 12 bars  (half-intensity of explore; C is minor-3rd from A for pivot)
+
+  Key lattice (for transition safety):
+    explore (A_aeolian) ─P5→ E-related  ─shared pitches→ D_phrygian (combat)
+    explore (A_aeolian) ─parallel major→ A_major (victory, tierce de Picardie)
+    combat  (D_phrygian) ─m3 down→ C_locrian  (dread — shares C, E-flat-ish microtonality, needs composed bridge)
+    explore (A_aeolian) ─m3 up→ C_locrian  (dread — diatonic shift, A is the 6th of C-Locrian aggregate)
+-->
+<music version="1" project="odyssey-showcase">
+
+  <!-- ========================= GLOBAL MIX / BUS CONFIG ========================= -->
+  <mix>
+    <!-- 4 busses, all referenced by /mixer-dump -->
+    <bus id="master"    level_db="-3.0" />
+    <bus id="music_bed" level_db="-6.0" duck_under="voice" duck_db="-4.0" duck_ms="180" />
+    <bus id="stinger"   level_db="-2.0" />
+    <bus id="sfx"       level_db="-4.0" duck_under="voice" duck_db="-2.0" duck_ms="120" />
+
+    <!-- Priority ladder: voice > stinger > music_bed > sfx. Not used in showcase
+         (no dialogue), but wired so routing is verifiable. -->
+    <priority order="voice,stinger,music_bed,sfx" />
+  </mix>
+
+  <!-- ========================= MUSIC STATES ========================= -->
+
+  <!-- EXPLORE — A aeolian, 72 BPM, 16 bars.
+       Three intensity-gated layers: bed (always), mid (curiosity), full (revelation).
+       Bed establishes pedal A drone + monastic solo voice cell.
+       Mid adds bowed cello counterline + ambient harp.
+       Full adds women's choir pad + solo flute on the leitmotif. -->
+  <music_state id="explore" bpm="72" key="A_aeolian" bars="16" meter="4/4">
+    <description>Liminal corridor exploration. Restraint, space, breath. The player
+      is the cathedral, the music is the candle. Layers bloom as awareness expands.</description>
+
+    <!-- Three vertical stems gated by continuous intensity [0,1]. -->
+    <layer id="bed"  stem="stems/explore/explore_72_Aaeolian_bed.wav"
+           intensity_min="0.00" intensity_max="1.00" gain_db="-6.0"
+           role="drone_plus_chant" />
+    <layer id="mid"  stem="stems/explore/explore_72_Aaeolian_mid.wav"
+           intensity_min="0.35" intensity_max="1.00" gain_db="-4.0"
+           role="cello_counterline" fade_bars="2" />
+    <layer id="full" stem="stems/explore/explore_72_Aaeolian_full.wav"
+           intensity_min="0.70" intensity_max="1.00" gain_db="-3.0"
+           role="choir_plus_flute_motif" fade_bars="4" />
+
+    <!-- Intensity hysteresis to prevent layer flicker. -->
+    <hysteresis layer="mid"  up="0.35" down="0.20" />
+    <hysteresis layer="full" up="0.70" down="0.55" />
+
+    <!-- Loop boundary at bar 16. Entry cue on beat 1 of bar 1; exit on bar 16 beat 4. -->
+    <loop entry_bar="1" exit_bar="16" />
+  </music_state>
+
+  <!-- COMBAT — D phrygian, 128 BPM, 8 bars.
+       Four intensity layers plus a percussion spine that never drops out.
+       ji  (always)           — shime-daiko 16ths, the heartbeat
+       bass (low_threat)      — low brass + cello ostinato on D
+       harm (engaged)         — strings + guitar power-fifths
+       lead (boss_active)     — solo trumpet + choir stabs on the fight motif -->
+  <music_state id="combat" bpm="128" key="D_phrygian" bars="8" meter="4/4">
+    <description>Kinetic, violent, sacred. Phrygian b2 (Eb over D) is the menace
+      fingerprint. The ji layer is the spine — it is the promise that the fight
+      has shape even when everything above it is chaos.</description>
+
+    <layer id="ji"   stem="stems/combat/combat_128_Dphrygian_ji.wav"
+           intensity_min="0.00" intensity_max="1.00" gain_db="-5.0"
+           role="taiko_jiuchi_spine" />
+    <layer id="bass" stem="stems/combat/combat_128_Dphrygian_bass.wav"
+           intensity_min="0.20" intensity_max="1.00" gain_db="-4.0"
+           role="low_ostinato" fade_bars="1" />
+    <layer id="harm" stem="stems/combat/combat_128_Dphrygian_harm.wav"
+           intensity_min="0.50" intensity_max="1.00" gain_db="-3.0"
+           role="strings_plus_guitar_fifths" fade_bars="2" />
+    <layer id="lead" stem="stems/combat/combat_128_Dphrygian_lead.wav"
+           intensity_min="0.80" intensity_max="1.00" gain_db="-2.0"
+           role="trumpet_choir_motif" fade_bars="2" />
+
+    <hysteresis layer="bass" up="0.20" down="0.10" />
+    <hysteresis layer="harm" up="0.50" down="0.35" />
+    <hysteresis layer="lead" up="0.80" down="0.65" />
+
+    <loop entry_bar="1" exit_bar="8" />
+  </music_state>
+
+  <!-- VICTORY — A major, 96 BPM, 8 bars.
+       Tierce de Picardie resolution: the exploration motif's minor third (C natural
+       in A aeolian) is raised to C# in A major. The plagal tail (IV → I = D → A)
+       gives liturgical weight. Full brass + choir + tutti strings. -->
+  <music_state id="victory" bpm="96" key="A_major" bars="8" meter="4/4">
+    <description>Earned. The hero theme stated clean, full register, plagal tail.
+      This cadence has been withheld from every other state in the demo so that
+      when it lands here, it means something.</description>
+
+    <layer id="brass"  stem="stems/victory/victory_96_Amajor_brass.wav"
+           intensity_min="0.00" intensity_max="1.00" gain_db="-3.0"
+           role="full_horns_plagal" />
+    <layer id="choir"  stem="stems/victory/victory_96_Amajor_choir.wav"
+           intensity_min="0.00" intensity_max="1.00" gain_db="-4.0"
+           role="SATB_open_vowels" />
+    <layer id="strings" stem="stems/victory/victory_96_Amajor_strings.wav"
+           intensity_min="0.00" intensity_max="1.00" gain_db="-4.0"
+           role="tutti_strings_legato" />
+
+    <loop entry_bar="1" exit_bar="8" final="true" />
+  </music_state>
+
+  <!-- DREAD — C locrian, 54 BPM, 12 bars.
+       Low drones + prepared piano. Locrian's diminished 5th (Gb over C) is the
+       fingerprint of no-ground. Player low HP, threat unseen. -->
+  <music_state id="dread" bpm="54" key="C_locrian" bars="12" meter="4/4">
+    <description>The ground is gone. Drone on C, no harmonic motion, prepared
+      piano plucks on inharmonic nodes. A waterphone shudder every 4 bars. This
+      state does not resolve; it waits.</description>
+
+    <layer id="drone"  stem="stems/dread/dread_54_Clocrian_drone.wav"
+           intensity_min="0.00" intensity_max="1.00" gain_db="-8.0"
+           role="low_drone_plus_sub" />
+    <layer id="piano"  stem="stems/dread/dread_54_Clocrian_piano.wav"
+           intensity_min="0.25" intensity_max="1.00" gain_db="-6.0"
+           role="prepared_piano_inharmonic" fade_bars="4" />
+    <layer id="metal"  stem="stems/dread/dread_54_Clocrian_metal.wav"
+           intensity_min="0.60" intensity_max="1.00" gain_db="-5.0"
+           role="waterphone_bowed_crotales" fade_bars="4" />
+
+    <hysteresis layer="piano" up="0.25" down="0.15" />
+    <hysteresis layer="metal" up="0.60" down="0.45" />
+
+    <loop entry_bar="1" exit_bar="12" />
+  </music_state>
+
+  <!-- ========================= TRANSITIONS ========================= -->
+  <!-- Every transition is a composed bridge, never a raw crossfade.
+       sync_mode: beat | bar | phrase | end_of_cue | immediate. -->
+
+  <transitions>
+
+    <!-- EXPLORE -> COMBAT  (stinger, sync=bar)
+         A aeolian -> D phrygian: D is the iv of A, so this is a modal pivot.
+         The stinger lands on the next bar boundary, carrying A over into the
+         new D phrygian pedal. 2 bars of composed bridge at the combat tempo. -->
+    <transition from="explore" to="combat"
+                sync_mode="bar"
+                stinger="combat_onset"
+                bridge_bars="2"
+                target_layer_intensity="0.5" />
+
+    <!-- COMBAT -> VICTORY  (stinger, sync=phrase on 8-bar boundary)
+         D phrygian -> A major: D is the IV of A major, so this is a plagal
+         lift. Stinger punctuates the kill, phrase boundary sets up the tierce
+         de Picardie. -->
+    <transition from="combat" to="victory"
+                sync_mode="phrase"
+                stinger="victory_fanfare"
+                bridge_bars="4"
+                target_layer_intensity="1.0" />
+
+    <!-- COMBAT -> DREAD  (crossfade on player_low_hp)
+         Triggered by player HP below threshold. A crossfade is musically wrong
+         for most transitions but intentional here: the ground dropping out IS
+         the experience. The crossfade IS the composition. Sync on beat to at
+         least preserve pulse alignment during the fade. -->
+    <transition from="combat" to="dread"
+                sync_mode="beat"
+                mode="crossfade"
+                crossfade_ms="1400"
+                trigger_event="player_low_hp"
+                target_layer_intensity="0.25" />
+
+    <!-- DREAD -> EXPLORE  (recovery, sync=bar)
+         Hope returns. No stinger — a silent bar, then the explore bed enters. -->
+    <transition from="dread" to="explore"
+                sync_mode="bar"
+                mode="silent_bar"
+                silence_bars="1"
+                target_layer_intensity="0.0" />
+
+    <!-- EXPLORE -> DREAD  (discovery-of-horror, sync=bar)
+         Shares the dread_reveal stinger. 1-bar bridge — intentional jolt. -->
+    <transition from="explore" to="dread"
+                sync_mode="bar"
+                stinger="dread_reveal"
+                bridge_bars="1"
+                target_layer_intensity="0.3" />
+
+    <!-- VICTORY -> EXPLORE  (post-climax decay)
+         Natural decay after victory loop's final bar. -->
+    <transition from="victory" to="explore"
+                sync_mode="end_of_cue"
+                mode="silent_bar"
+                silence_bars="2"
+                target_layer_intensity="0.0" />
+
+  </transitions>
+
+  <!-- ========================= STINGERS ========================= -->
+  <!-- Stingers ride over the bed; sfx/music_bed is ducked by the mix config.
+       Each stinger is authored at a tempo and key compatible with both source
+       and destination states so it can fire as punctuation anywhere. -->
+
+  <stingers>
+    <stinger id="combat_onset"    file="stingers/combat_onset.wav"
+             duration_ms="1500" bpm="128" key="D_phrygian"
+             sync_mode="bar" bus="stinger" gain_db="-2.0" />
+
+    <stinger id="boss_sighted"    file="stingers/boss_sighted.wav"
+             duration_ms="2400" bpm="96"  key="D_phrygian"
+             sync_mode="bar" bus="stinger" gain_db="-1.0" />
+
+    <stinger id="victory_fanfare" file="stingers/victory_fanfare.wav"
+             duration_ms="3200" bpm="96"  key="A_major"
+             sync_mode="phrase" bus="stinger" gain_db="0.0" />
+
+    <stinger id="ally_down"       file="stingers/ally_down.wav"
+             duration_ms="2000" bpm="72"  key="A_aeolian"
+             sync_mode="beat" bus="stinger" gain_db="-2.0" />
+
+    <stinger id="treasure_found"  file="stingers/treasure_found.wav"
+             duration_ms="1800" bpm="72"  key="A_aeolian"
+             sync_mode="bar" bus="stinger" gain_db="-1.0" />
+
+    <stinger id="dread_reveal"    file="stingers/dread_reveal.wav"
+             duration_ms="2600" bpm="54"  key="C_locrian"
+             sync_mode="bar" bus="stinger" gain_db="-1.0" />
+  </stingers>
+
+  <!-- ========================= SOUND REQUEST ROUTING TABLE ========================= -->
+  <!-- Mirrors project memory: Nadir sound_request IDs route by range.
+       [0x0000, 0x7FFF] → Mixer SFX pool
+       [0x8000, 0x8FFF] → MusicDirector::fire_stinger
+       [0x9000, 0x9FFF] → MusicDirector::set_scene_theme
+       [0xA000, 0xAFFF] → MusicDirector::play_leitmotif -->
+
+  <sound_request_routing>
+    <!-- Stingers -->
+    <map id="0x8001" api="fire_stinger"      arg="combat_onset" />
+    <map id="0x8002" api="fire_stinger"      arg="boss_sighted" />
+    <map id="0x8003" api="fire_stinger"      arg="victory_fanfare" />
+    <map id="0x8004" api="fire_stinger"      arg="ally_down" />
+    <map id="0x8005" api="fire_stinger"      arg="treasure_found" />
+    <map id="0x8006" api="fire_stinger"      arg="dread_reveal" />
+
+    <!-- Scene themes -->
+    <map id="0x9001" api="set_scene_theme"   arg="explore" />
+    <map id="0x9002" api="set_scene_theme"   arg="combat" />
+    <map id="0x9003" api="set_scene_theme"   arg="victory" />
+    <map id="0x9004" api="set_scene_theme"   arg="dread" />
+
+    <!-- Leitmotifs (archetype-bound) -->
+    <map id="0xA101" api="play_leitmotif"    arg="scout_theme:hostile:solo_flute" />
+    <map id="0xA102" api="play_leitmotif"    arg="scout_theme:distant:muted_horn" />
+    <map id="0xA201" api="play_leitmotif"    arg="brute_theme:hostile:solo_taiko" />
+    <map id="0xA202" api="play_leitmotif"    arg="brute_theme:mournful:solo_viola" />
+    <map id="0xA301" api="play_leitmotif"    arg="ranger_theme:hostile:low_brass" />
+    <map id="0xA302" api="play_leitmotif"    arg="ranger_theme:distant:muted_horn" />
+  </sound_request_routing>
+
+</music>

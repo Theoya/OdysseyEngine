@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Sacred — North Altar zone.
+  Reference films/games (kb §4): Malick "The New World", "Arrival" cathedral,
+  "Journey" summit, Dark Souls firelink after kindling.
+  Read: reverent, hero-scale, warm altar under cool sky. Every light must have
+  a plausible source: sky window (key), altar candle (secondary). No fluorescent
+  greens, no clinical blues. Contrast is high but shadows are soft.
+-->
+<lighting_profile preset="Sacred" version="1">
+  <palette>
+    <primary_kelvin min="5500" max="6500"/>
+    <secondary_kelvin min="1800" max="2800"/>
+    <saturation_max value="0.55"/>
+    <contrast_ratio key_to_fill="4:1" key_to_back="3:1"/>
+  </palette>
+
+  <fog type="exponential_height" density="0.015" color_kelvin="6000" height="12"/>
+  <volumetrics enabled="1" god_rays="1" density_variance="0.35" steps="48"/>
+
+  <directional_override kelvin="6200" intensity="3.0" direction="0.0 -0.9 -0.4"/>
+
+  <post_fx>
+    <tonemap  curve="aces" exposure="0.95"/>
+    <bloom    threshold="1.1" intensity="0.6" radius="0.45"/>
+    <grade    lift="0.02 0.04 0.06" gamma="1.00 0.99 0.97" gain="1.02 1.00 0.98"/>
+    <vignette strength="0.18" roundness="1.1"/>
+    <grain    intensity="0.04" response="0.8"/>
+  </post_fx>
+
+  <disallowed_sources>
+    <kelvin_below value="2000"/>
+    <kelvin_above value="8000"/>
+    <band min="4000" max="5000" reason="Sacred does not use sickly neutral-fluorescent mids"/>
+  </disallowed_sources>
+</lighting_profile>

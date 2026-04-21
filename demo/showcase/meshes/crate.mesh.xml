@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  crate.mesh.xml
+  Primitive box with multi-tier LOD chain and a tight box collider.
+  Exercises: source=primitive, dimensions, <lod><level/>, collider auto_fit.
+-->
+<mesh name="showcase_crate" version="1">
+  <source format="primitive" path="box"/>
+  <dimensions width="1.5" height="1.5" depth="1.5"/>
+  <lod>
+    <level distance="0"   triangles="12"/>
+    <level distance="20"  triangles="12"/>
+    <level distance="60"  triangles="6"/>
+  </lod>
+  <collider type="box" auto_fit="true"/>
+</mesh>
