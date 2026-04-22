@@ -41,7 +41,9 @@ Result<std::vector<uint32_t>> compile_glsl(
 {
     shaderc::Compiler compiler;
     shaderc::CompileOptions options;
-    options.SetTargetEnvironment(shaderc_target_env_vulkan, shaderc_env_version_vulkan_1_0);
+    // Target Vulkan 1.2 so GL_EXT_nonuniform_qualifier / NonUniform decoration
+    // is available for the bindless texture array in basic.frag.
+    options.SetTargetEnvironment(shaderc_target_env_vulkan, shaderc_env_version_vulkan_1_2);
     options.SetOptimizationLevel(shaderc_optimization_level_performance);
 
     auto result = compiler.CompileGlslToSpv(source, kind, filename.c_str(), options);
@@ -182,6 +184,15 @@ Result<VkCommandBuffer> Renderer::begin_frame(uint32_t image_index, VkCommandBuf
     // Bind the graphics pipeline
     vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline_);
 
+    // Bind the bindless descriptor set (set=0) once per frame.
+    // This single vkCmdBindDescriptorSets call covers all materials for the frame.
+    // PostProcessor binds its own sets on its own pipeline — no conflict.
+    if (bindless_registry_ && bindless_registry_->descriptor_set() != VK_NULL_HANDLE) {
+        VkDescriptorSet ds = bindless_registry_->descriptor_set();
+        vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline_layout_,
+                                0, 1, &ds, 0, nullptr);
+    }
+
     // Set dynamic viewport and scissor
     VkViewport viewport{};
     viewport.x        = 0.0f;
@@ -224,6 +235,13 @@ Result<VkCommandBuffer> Renderer::begin_frame_offscreen(VkRenderPass render_pass
 
     vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline_);
 
+    // Bind bindless descriptor set (set=0) once per offscreen frame.
+    if (bindless_registry_ && bindless_registry_->descriptor_set() != VK_NULL_HANDLE) {
+        VkDescriptorSet ds = bindless_registry_->descriptor_set();
+        vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline_layout_,
+                                0, 1, &ds, 0, nullptr);
+    }
+
     VkViewport viewport{};
     viewport.x        = 0.0f;
     viewport.y        = 0.0f;
@@ -241,7 +259,8 @@ Result<VkCommandBuffer> Renderer::begin_frame_offscreen(VkRenderPass render_pass
     return Result<VkCommandBuffer>::ok(cmd);
 }
 
-void Renderer::draw(const mat4& mvp, const vec4& color, PrimitiveType mesh_type) {
+void Renderer::draw(const mat4& mvp, const vec4& color, PrimitiveType mesh_type,
+                    uint32_t material_index) {
     if (active_cmd_ == VK_NULL_HANDLE) return;
 
     // Select the mesh
@@ -256,8 +275,9 @@ void Renderer::draw(const mat4& mvp, const vec4& color, PrimitiveType mesh_type)
 
     // Push constants
     BasicPushConstants pc{};
-    pc.mvp   = mvp;
-    pc.color = color;
+    pc.mvp            = mvp;
+    pc.color          = color;
+    pc.material_index = material_index;
     vkCmdPushConstants(active_cmd_, pipeline_layout_,
                        VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
                        0, sizeof(BasicPushConstants), &pc);
@@ -551,13 +571,14 @@ Result<bool> Renderer::create_pipeline() {
 
     std::array<VkPipelineShaderStageCreateInfo, 2> shader_stages = {vert_stage, frag_stage};
 
-    // Vertex input: BasicVertex has position (vec3) at offset 0, normal (vec3) at offset 12
+    // Vertex input: BasicVertex has position (vec3) at offset 0, normal (vec3) at offset 12,
+    // UV (vec2) at offset 24.  (Phase 6: UV added for bindless texture sampling.)
     VkVertexInputBindingDescription binding_desc{};
     binding_desc.binding   = 0;
     binding_desc.stride    = sizeof(BasicVertex);
     binding_desc.inputRate = VK_VERTEX_INPUT_RATE_VERTEX;
 
-    std::array<VkVertexInputAttributeDescription, 2> attr_descs{};
+    std::array<VkVertexInputAttributeDescription, 3> attr_descs{};
     // location 0: position (vec3, offset 0)
     attr_descs[0].binding  = 0;
     attr_descs[0].location = 0;
@@ -568,6 +589,11 @@ Result<bool> Renderer::create_pipeline() {
     attr_descs[1].location = 1;
     attr_descs[1].format   = VK_FORMAT_R32G32B32_SFLOAT;
     attr_descs[1].offset   = offsetof(BasicVertex, normal);
+    // location 2: UV (vec2, offset 24)
+    attr_descs[2].binding  = 0;
+    attr_descs[2].location = 2;
+    attr_descs[2].format   = VK_FORMAT_R32G32_SFLOAT;
+    attr_descs[2].offset   = offsetof(BasicVertex, uv);
 
     VkPipelineVertexInputStateCreateInfo vertex_input{};
     vertex_input.sType                           = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO;
@@ -637,16 +663,25 @@ Result<bool> Renderer::create_pipeline() {
     dynamic_state.dynamicStateCount = static_cast<uint32_t>(dynamic_states.size());
     dynamic_state.pDynamicStates    = dynamic_states.data();
 
-    // Pipeline layout: push constants only (no descriptor sets)
+    // Pipeline layout: push constants + optional set=0 bindless descriptor layout.
+    // When a BindlessTextureRegistry is attached, set=0 is the bindless texture array.
+    // set=1 (per-frame UBOs) is NOT in this pipeline's layout — the renderer uses
+    // push constants only for MVP/color/material_index.  PostProcessor manages set=1
+    // on its own pipeline layout (PostProcessor is untouched — architect condition).
     VkPushConstantRange push_range{};
     push_range.stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
     push_range.offset     = 0;
     push_range.size       = sizeof(BasicPushConstants);
 
+    VkDescriptorSetLayout set_layout = VK_NULL_HANDLE;
+    if (bindless_registry_) {
+        set_layout = bindless_registry_->descriptor_set_layout();
+    }
+
     VkPipelineLayoutCreateInfo layout_ci{};
     layout_ci.sType                  = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
-    layout_ci.setLayoutCount         = 0;
-    layout_ci.pSetLayouts            = nullptr;
+    layout_ci.setLayoutCount         = (set_layout != VK_NULL_HANDLE) ? 1u : 0u;
+    layout_ci.pSetLayouts            = (set_layout != VK_NULL_HANDLE) ? &set_layout : nullptr;
     layout_ci.pushConstantRangeCount = 1;
     layout_ci.pPushConstantRanges    = &push_range;
 
