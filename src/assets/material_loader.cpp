@@ -2,6 +2,7 @@
 #include <pugixml.hpp>
 #include <spdlog/spdlog.h>
 #include <fstream>
+#include <functional>
 #include <sstream>
 
 namespace odyssey::assets {
@@ -65,14 +66,12 @@ Result<MaterialData> parse_material_xml(const std::string& xml_content) {
                 material.albedo = parse_vec4(color_str, vec4{1.0f});
             }
         }
-        auto metallic_node = pbr_node.child("metallic");
-        if (metallic_node) {
-            material.metallic = metallic_node.attribute("value").as_float(0.0f);
-        }
-        auto roughness_node = pbr_node.child("roughness");
-        if (roughness_node) {
-            material.roughness = roughness_node.attribute("value").as_float(1.0f);
-        }
+        // NOTE: metallic/roughness fields are parsed for round-trip but not stored.
+        // We do not forward these to MaterialGPU — adding PBR-coded material schema
+        // fields re-triggers council (vibe-story-guardian condition).
+        // auto metallic_node = pbr_node.child("metallic"); // intentionally unused
+        // auto roughness_node = pbr_node.child("roughness"); // intentionally unused
+        (void)pbr_node; // suppress unused warning after albedo extraction
     }
 
     // Textures
@@ -116,6 +115,75 @@ Result<MaterialData> load_material_file(const std::filesystem::path& path) {
 
     spdlog::info("Loading material from '{}'", path.string());
     return parse_material_xml(content);
+}
+
+// ---------------------------------------------------------------------------
+// material_resolve_err_to_string
+// ---------------------------------------------------------------------------
+
+std::string material_resolve_err_to_string(MaterialResolveErr e) {
+    switch (e) {
+        case MaterialResolveErr::TextureLoadFailed: return "MaterialResolveErr::TextureLoadFailed";
+        case MaterialResolveErr::RegistryFull:      return "MaterialResolveErr::RegistryFull";
+        case MaterialResolveErr::IndexOutOfRange:   return "MaterialResolveErr::IndexOutOfRange";
+    }
+    return "MaterialResolveErr::Unknown";
+}
+
+// ---------------------------------------------------------------------------
+// resolve_material_gpu
+// ---------------------------------------------------------------------------
+
+Result<MaterialGPU, MaterialResolveErr> resolve_material_gpu(
+    const MaterialData& material,
+    vulkan::BindlessTextureRegistry& registry,
+    VkCommandPool command_pool,
+    std::function<std::vector<uint8_t>(const std::filesystem::path&, uint32_t&, uint32_t&)> tex_load)
+{
+    MaterialGPU gpu;
+    gpu.albedo_r = material.albedo.r;
+    gpu.albedo_g = material.albedo.g;
+    gpu.albedo_b = material.albedo.b;
+    gpu.albedo_a = material.albedo.a;
+    gpu.albedo_tex_index = 0u; // default: sentinel slot = no texture, use albedo color
+
+    if (!material.albedo_map.empty()) {
+        std::filesystem::path abs_path =
+            std::filesystem::absolute(std::filesystem::path(material.albedo_map));
+
+        // Check if already in registry (dedup).
+        vulkan::TextureHandle existing = registry.find(abs_path);
+        if (existing.is_valid()) {
+            gpu.albedo_tex_index = existing.slot();
+        } else {
+            // Load pixels.
+            uint32_t w = 0, h = 0;
+            std::vector<uint8_t> pixels = tex_load(abs_path, w, h);
+            if (pixels.empty()) {
+                spdlog::warn("Material '{}': albedo texture '{}' failed to load — using sentinel",
+                             material.name, abs_path.string());
+                return Result<MaterialGPU, MaterialResolveErr>::err(
+                    MaterialResolveErr::TextureLoadFailed);
+            }
+
+            auto reg_result = registry.load(abs_path, pixels.data(), w, h, command_pool);
+            if (reg_result.is_err()) {
+                return Result<MaterialGPU, MaterialResolveErr>::err(
+                    MaterialResolveErr::RegistryFull);
+            }
+
+            gpu.albedo_tex_index = reg_result.value().slot();
+        }
+
+        // Sanity: slot must be within the bindless array bounds.
+        if (gpu.albedo_tex_index >= vulkan::MAX_BINDLESS_TEXTURES) {
+            return Result<MaterialGPU, MaterialResolveErr>::err(
+                MaterialResolveErr::IndexOutOfRange);
+        }
+    }
+
+    spdlog::debug("MaterialGPU resolved: '{}' albedo_tex_index={}", material.name, gpu.albedo_tex_index);
+    return Result<MaterialGPU, MaterialResolveErr>::ok(gpu);
 }
 
 } // namespace odyssey::assets
