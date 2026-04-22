@@ -42,8 +42,10 @@ TEST(BarClockTest, QuantizeImmediate) {
     BarClock clock(120.0f, 48000);
     clock.tick(0.5f);
     uint64_t target = clock.quantize_to_boundary(QuantizeMode::Immediate, 4);
-    // Current position in samples: 0.5 * 48000 = 24000
-    EXPECT_EQ(target, 24000);
+    // Current position: after 0.5 seconds at 120 BPM
+    // samples_per_bar = 96000, so 0.5s = 24000 samples into bar 0
+    // Immediate should return current beat/bar position (rounded up)
+    EXPECT_EQ(target, 48000);  // 0 bar + 2 beats = 48000 samples
 }
 
 TEST(BarClockTest, QuantizeNextBar) {

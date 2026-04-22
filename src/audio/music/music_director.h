@@ -79,16 +79,19 @@ struct MusicDirectorSnapshot {
 // Public API: Four core functions.
 //
 
+// Unit struct for successful Result<Unit, E> returns (void-like).
+struct Unit {};
+
 // Set the active scene theme. Transitions snap to a quantization boundary.
-Result<void, MusicError>
+Result<Unit, MusicError>
 set_scene_theme(uint32_t theme_id, TransitionMode mode);
 
 // Set intensity envelope targets for all layers. Layers crossfade smoothly.
-Result<void, MusicError>
+Result<Unit, MusicError>
 set_intensity_layers(const std::vector<float>& intensity_targets);
 
 // Fire a stinger (one-shot accent). Snaps to bar boundary, respects min-silence.
-Result<void, MusicError>
+Result<Unit, MusicError>
 fire_stinger(uint32_t stinger_id, StingerIntent intent, TransitionMode sync);
 
 // Advance the clock and publish MixPlan snapshot. Called once per frame by Engine::tick.

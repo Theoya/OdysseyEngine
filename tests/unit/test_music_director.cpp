@@ -21,6 +21,12 @@ TEST(MusicDirectorTest, SetIntensityLayersInvalidRange) {
     EXPECT_EQ(result.error(), MusicError::InvalidIntensityRange);
 }
 
+TEST(MusicDirectorTest, SetIntensityLayersNegative) {
+    std::vector<float> intensities = {-0.1f};  // Negative is out of range
+    auto result = set_intensity_layers(intensities);
+    EXPECT_TRUE(result.is_err());
+}
+
 TEST(MusicDirectorTest, FireStinger) {
     auto result = fire_stinger(0, StingerIntent::Punctuate, TransitionMode::NextBar);
     EXPECT_TRUE(result.is_ok());

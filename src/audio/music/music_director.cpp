@@ -38,29 +38,29 @@ static MusicDirectorImpl g_music_director;
 
 } // namespace
 
-Result<void, MusicError>
+Result<Unit, MusicError>
 set_scene_theme(uint32_t theme_id, TransitionMode mode) {
     // TODO: Validate theme exists, apply quantization, transition state.
     g_music_director.current_theme_id = theme_id;
-    return Result<void, MusicError>::ok();
+    return Result<Unit, MusicError>::ok(Unit{});
 }
 
-Result<void, MusicError>
+Result<Unit, MusicError>
 set_intensity_layers(const std::vector<float>& intensity_targets) {
     // TODO: Validate ranges, update envelope targets.
     for (float t : intensity_targets) {
         if (t < 0.0f || t > 1.0f) {
-            return Result<void, MusicError>::err(MusicError::InvalidIntensityRange);
+            return Result<Unit, MusicError>::err(MusicError::InvalidIntensityRange);
         }
     }
     g_music_director.current_intensities = intensity_targets;
-    return Result<void, MusicError>::ok();
+    return Result<Unit, MusicError>::ok(Unit{});
 }
 
-Result<void, MusicError>
+Result<Unit, MusicError>
 fire_stinger(uint32_t stinger_id, StingerIntent intent, TransitionMode sync) {
     // TODO: Queue stinger, validate ID, apply quantization.
-    return Result<void, MusicError>::ok();
+    return Result<Unit, MusicError>::ok(Unit{});
 }
 
 void tick(float dt_seconds) {
