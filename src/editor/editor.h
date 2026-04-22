@@ -135,6 +135,15 @@ struct EditorState {
 
     // Batch D: Grid overlay visibility toggle.
     bool show_grid = true;
+
+    // --- Batch F: Play mode ---
+    // True when in Play or Simulate mode but paused (dt=0 in the engine tick).
+    // Toggled by the Pause button; Step button advances one frame when true.
+    bool play_paused = false;
+
+    // True when Play button was pressed to capture a snapshot.
+    // Used to fire the snapshot capture once per mode transition.
+    bool play_snapshot_requested = false;
 };
 
 // Pure helper: given an entity pointer, produce a stable display label.

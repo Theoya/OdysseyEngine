@@ -9,6 +9,10 @@
 #include "editor/scene_viewport_renderer.h"
 #include "editor/file_dialog_win32.h"
 #include "editor/editor_prefs.h"
+#include "editor/play_snapshot.h"
+#include "editor/undo_stack.h"
+#include "editor/layout_presets.h"
+#include "editor/entity_clipboard.h"
 
 #include "scene/scene_loader.h"
 #include "scene/scene_serializer.h"
@@ -130,6 +134,15 @@ struct Editor::Impl {
     // Batch B: editor preferences (recent scenes, etc.)
     EditorPrefs editor_prefs;
     std::string cached_window_title;  // For efficient title-bar updates
+
+    // Batch F: Play-in-Editor snapshot/restore
+    std::optional<PlaySnapshot> play_snapshot;
+
+    // Batch F: Undo/redo stacks
+    UndoStack undo_stack;
+
+    // Batch F: Scene dirty flag tracking (for undo capture)
+    bool scene_dirty_prev = false;
 };
 
 // ---------------------------------------------------------------------------
@@ -938,6 +951,153 @@ void Editor::draw_menu_bar() {
         ImGui::EndMenu();
     }
 
+    // Batch F: Edit menu (Undo/Redo)
+    if (ImGui::BeginMenu("Edit")) {
+        ImGuiIO& io = ImGui::GetIO();
+        bool can_undo = impl_->undo_stack.can_undo();
+        bool can_redo = impl_->undo_stack.can_redo();
+
+        // Ctrl+Z - Undo (with description if available)
+        std::string undo_label = "Undo";
+        if (can_undo) {
+            if (const auto* entry = impl_->undo_stack.peek_undo()) {
+                undo_label += " " + entry->description;
+            }
+        }
+        if (ImGui::MenuItem(undo_label.c_str(), "Ctrl+Z", false, can_undo) ||
+            ((io.KeyCtrl || io.KeySuper) && ImGui::IsKeyPressed(ImGuiKey_Z, false) &&
+             !io.WantCaptureKeyboard && can_undo)) {
+            auto entry = impl_->undo_stack.pop_undo();
+            auto restore_res = restore_snapshot(
+                PlaySnapshot{entry.state, entry.entities},
+                impl_->scene_data, impl_->entities);
+            if (restore_res.is_ok()) {
+                spdlog::info("[editor] undo: {}", entry.description);
+            } else {
+                spdlog::warn("[editor] undo failed: {}", restore_res.error());
+            }
+        }
+
+        // Ctrl+Y - Redo (with description if available)
+        std::string redo_label = "Redo";
+        if (can_redo) {
+            if (const auto* entry = impl_->undo_stack.peek_redo()) {
+                redo_label += " " + entry->description;
+            }
+        }
+        if (ImGui::MenuItem(redo_label.c_str(), "Ctrl+Y", false, can_redo) ||
+            ((io.KeyCtrl || io.KeySuper) && ImGui::IsKeyPressed(ImGuiKey_Y, false) &&
+             !io.WantCaptureKeyboard && can_redo)) {
+            auto entry = impl_->undo_stack.pop_redo();
+            auto restore_res = restore_snapshot(
+                PlaySnapshot{entry.state, entry.entities},
+                impl_->scene_data, impl_->entities);
+            if (restore_res.is_ok()) {
+                spdlog::info("[editor] redo: {}", entry.description);
+            } else {
+                spdlog::warn("[editor] redo failed: {}", restore_res.error());
+            }
+        }
+
+        // Cut (Ctrl+X)
+        bool can_cut = state_.selected_entity != INVALID_ENTITY || !state_.multi_selected.empty();
+        if (ImGui::MenuItem("Cut", "Ctrl+X", false, can_cut) ||
+            ((io.KeyCtrl || io.KeySuper) && ImGui::IsKeyPressed(ImGuiKey_X, false) &&
+             !io.WantCaptureKeyboard && can_cut)) {
+            // Copy selected entities to clipboard and mark as cut
+            if (state_.selected_entity != INVALID_ENTITY) {
+                if (auto* e = impl_->entities.get_entity(state_.selected_entity)) {
+                    clipboard_copy_entity(*e);
+                    entity_clipboard().is_cut = true;
+                    impl_->entities.destroy_entity(state_.selected_entity);
+                    state_.selected_entity = INVALID_ENTITY;
+                }
+            }
+            spdlog::info("[editor] cut");
+        }
+
+        // Copy (Ctrl+C)
+        bool can_copy = state_.selected_entity != INVALID_ENTITY || !state_.multi_selected.empty();
+        if (ImGui::MenuItem("Copy", "Ctrl+C", false, can_copy) ||
+            ((io.KeyCtrl || io.KeySuper) && ImGui::IsKeyPressed(ImGuiKey_C, false) &&
+             !io.WantCaptureKeyboard && can_copy)) {
+            if (state_.selected_entity != INVALID_ENTITY) {
+                if (auto* e = impl_->entities.get_entity(state_.selected_entity)) {
+                    clipboard_copy_entity(*e);
+                }
+            }
+            spdlog::info("[editor] copy");
+        }
+
+        // Paste (Ctrl+V)
+        bool can_paste = !entity_clipboard().entities.empty();
+        if (ImGui::MenuItem("Paste", "Ctrl+V", false, can_paste) ||
+            ((io.KeyCtrl || io.KeySuper) && ImGui::IsKeyPressed(ImGuiKey_V, false) &&
+             !io.WantCaptureKeyboard && can_paste)) {
+            // Paste entities from clipboard
+            for (const auto& [id, entity] : entity_clipboard().entities) {
+                // Create new entity with cloned data
+                auto new_id = impl_->entities.create_entity(entity.name, entity.archetype);
+                auto* new_entity = impl_->entities.get_entity(new_id);
+                if (new_entity) {
+                    new_entity->components = entity.components;
+                }
+            }
+            if (entity_clipboard().is_cut) {
+                clipboard_clear();
+            }
+            spdlog::info("[editor] paste");
+        }
+
+        ImGui::Separator();
+
+        // Select All (Ctrl+A)
+        if (ImGui::MenuItem("Select All", "Ctrl+A") ||
+            ((io.KeyCtrl || io.KeySuper) && ImGui::IsKeyPressed(ImGuiKey_A, false) &&
+             !io.WantCaptureKeyboard)) {
+            state_.multi_selected.clear();
+            for (const auto& [id, entity] : impl_->entities.get_all_entities()) {
+                state_.multi_selected.insert(id);
+            }
+            spdlog::info("[editor] select all ({} entities)", state_.multi_selected.size());
+        }
+
+        // Deselect All (Esc)
+        if (ImGui::MenuItem("Deselect All", "Esc") ||
+            (ImGui::IsKeyPressed(ImGuiKey_Escape, false) && !io.WantCaptureKeyboard)) {
+            state_.selected_entity = INVALID_ENTITY;
+            state_.multi_selected.clear();
+            spdlog::info("[editor] deselect all");
+        }
+
+        ImGui::EndMenu();
+    }
+
+    // Batch F: Window menu (Layout presets)
+    if (ImGui::BeginMenu("Window")) {
+        if (ImGui::BeginMenu("Layout")) {
+            if (ImGui::MenuItem("Default")) {
+                // Apply Default preset
+                spdlog::info("[editor] layout: Default");
+                impl_->editor_prefs.active_layout = "Default";
+            }
+            if (ImGui::MenuItem("2-by-3")) {
+                spdlog::info("[editor] layout: 2-by-3");
+                impl_->editor_prefs.active_layout = "2-by-3";
+            }
+            if (ImGui::MenuItem("Tall")) {
+                spdlog::info("[editor] layout: Tall");
+                impl_->editor_prefs.active_layout = "Tall";
+            }
+            if (ImGui::MenuItem("Wide")) {
+                spdlog::info("[editor] layout: Wide");
+                impl_->editor_prefs.active_layout = "Wide";
+            }
+            ImGui::EndMenu();
+        }
+        ImGui::EndMenu();
+    }
+
     if (ImGui::BeginMenu("View")) {
         for (auto& p : panels_) {
             bool v = p->visible();
@@ -966,27 +1126,120 @@ void Editor::draw_menu_bar() {
 }
 
 void Editor::draw_mode_toolbar() {
-    auto mode_button = [&](Mode m, ImU32 color) {
-        bool is_current = (state_.mode == m);
-        std::string_view label = mode_label(m);
-        if (is_current) {
-            ImGui::PushStyleColor(ImGuiCol_Button, ImColor(color).Value);
-        }
-        std::string btn{label};
-        if (ImGui::Button(btn.c_str())) {
-            if (state_.mode != m) {
-                state_.mode = m;
+    // Batch F: Compact 5-button toolbar with mode pill
+    // Buttons: Play, Stop, Pause, Step, Simulate; right-align mode pill
+
+    bool in_play_or_simulate = (state_.mode == Mode::Play || state_.mode == Mode::Simulate);
+
+    // Play button (green when active)
+    if (ImGui::Button("Play##mode_play")) {
+        if (state_.mode != Mode::Play) {
+            // Capture snapshot before switching to Play mode
+            auto snap = capture_snapshot(impl_->scene_data, impl_->entities);
+            if (snap.is_ok()) {
+                impl_->play_snapshot = snap.value();
+                state_.mode = Mode::Play;
+                state_.play_paused = false;
                 state_.dirty = true;
-                spdlog::info("[editor] mode: {}", btn);
+                spdlog::info("[editor] mode: Play (snapshot captured)");
+            } else {
+                spdlog::warn("[editor] failed to capture Play snapshot: {}", snap.error());
             }
         }
-        if (is_current) ImGui::PopStyleColor();
-    };
-    mode_button(Mode::Edit,     IM_COL32(60,  80, 160, 255));
+    }
     ImGui::SameLine();
-    mode_button(Mode::Play,     IM_COL32(60, 160,  80, 255));
-    ImGui::SameLine();
-    mode_button(Mode::Simulate, IM_COL32(160, 120, 60, 255));
+
+    // Stop button (only visible when not in Edit mode)
+    if (in_play_or_simulate) {
+        if (ImGui::Button("Stop##mode_stop")) {
+            // Restore snapshot
+            if (impl_->play_snapshot) {
+                auto res = restore_snapshot(
+                    impl_->play_snapshot.value(),
+                    impl_->scene_data,
+                    impl_->entities);
+                if (res.is_ok()) {
+                    impl_->play_snapshot.reset();
+                    state_.mode = Mode::Edit;
+                    state_.play_paused = false;
+                    state_.dirty = true;
+                    spdlog::info("[editor] mode: Edit (snapshot restored)");
+                } else {
+                    spdlog::warn("[editor] failed to restore snapshot: {}", res.error());
+                }
+            } else {
+                spdlog::warn("[editor] no play snapshot to restore");
+            }
+        }
+        ImGui::SameLine();
+    }
+
+    // Pause button (only visible when in Play/Simulate)
+    if (in_play_or_simulate) {
+        bool is_paused = state_.play_paused;
+        if (is_paused) {
+            ImGui::PushStyleColor(ImGuiCol_Button, ImColor(100, 100, 100).Value);
+        }
+        if (ImGui::Button("Pause##mode_pause")) {
+            state_.play_paused = !state_.play_paused;
+            spdlog::info("[editor] pause: {}", state_.play_paused ? "on" : "off");
+        }
+        if (is_paused) ImGui::PopStyleColor();
+        ImGui::SameLine();
+
+        // Step button (only visible when paused)
+        if (is_paused) {
+            if (ImGui::Button("Step##mode_step")) {
+                // Fire-once flag: set a flag so the engine advances one frame
+                spdlog::info("[editor] step (1 frame)");
+                // TODO: wire this to the engine's frame-advance logic
+            }
+            ImGui::SameLine();
+        }
+    }
+
+    // Simulate button (orange)
+    if (ImGui::Button("Simulate##mode_simulate")) {
+        if (state_.mode != Mode::Simulate) {
+            // Capture snapshot before switching to Simulate mode
+            auto snap = capture_snapshot(impl_->scene_data, impl_->entities);
+            if (snap.is_ok()) {
+                impl_->play_snapshot = snap.value();
+                state_.mode = Mode::Simulate;
+                state_.play_paused = false;
+                state_.dirty = true;
+                spdlog::info("[editor] mode: Simulate (snapshot captured)");
+            } else {
+                spdlog::warn("[editor] failed to capture Simulate snapshot: {}", snap.error());
+            }
+        }
+    }
+
+    // Mode pill (right-aligned)
+    ImGui::SameLine(ImGui::GetWindowWidth() - 150.0f);
+    ImU32 pill_color;
+    const char* pill_text;
+    switch (state_.mode) {
+    case Mode::Edit:
+        pill_color = IM_COL32(30, 144, 255, 255);  // Blue
+        pill_text = "Edit";
+        break;
+    case Mode::Play:
+        pill_color = IM_COL32(76, 175, 80, 255);   // Green
+        pill_text = "Play";
+        break;
+    case Mode::Simulate:
+        pill_color = IM_COL32(255, 152, 0, 255);   // Orange
+        pill_text = "Simulate";
+        break;
+    default:
+        pill_color = IM_COL32(128, 128, 128, 255);
+        pill_text = "Unknown";
+    }
+
+    ImGui::PushStyleColor(ImGuiCol_Button, ImColor(pill_color).Value);
+    ImGui::Button(pill_text, ImVec2(120, 0));
+    ImGui::PopStyleColor();
 }
 
 void Editor::draw_status_bar() {
