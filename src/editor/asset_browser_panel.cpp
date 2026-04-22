@@ -255,6 +255,27 @@ void AssetBrowserPanel::draw(EditorState& state) {
         if (ImGui::Selectable(rel_s.c_str(), is_selected, sflags)) {
             state.selected_asset = e.path;
         }
+
+        // F26: Drag-drop source for assets onto Inspector slots
+        if (ImGui::BeginDragDropSource(ImGuiDragDropFlags_None)) {
+            const char* payload_type = nullptr;
+            switch (e.type) {
+            case AssetType::Mesh:     payload_type = "ASSET_MESH"; break;
+            case AssetType::Material: payload_type = "ASSET_MATERIAL"; break;
+            case AssetType::Behavior: payload_type = "ASSET_BEHAVIOR"; break;
+            case AssetType::Prefab:   payload_type = "ASSET_PREFAB"; break;
+            default: break;
+            }
+
+            if (payload_type) {
+                const std::string& path_str = e.path.generic_string();
+                ImGui::SetDragDropPayload(payload_type, path_str.c_str(),
+                                         path_str.size() + 1);
+            }
+            ImGui::TextUnformatted(rel_s.c_str());
+            ImGui::EndDragDropSource();
+        }
+
         if (ImGui::IsItemHovered() && ImGui::IsMouseDoubleClicked(0)) {
             // Scene double-click → request scene swap (gated on Edit).
             if (e.type == AssetType::Scene) {

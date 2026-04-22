@@ -1,0 +1,8 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(cat /c/Users/THadfield/.claude/skills/*)",
+      "Bash(mkdir -p /c/Users/THadfield/.claude/skills/*)"
+    ]
+  }
+}

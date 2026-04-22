@@ -1,10 +1,13 @@
 #include "editor/inspector_panel.h"
 #include "editor/editor.h"
 #include "editor/mode_enum.h"
+#include "editor/component_descriptor.h"
+#include "editor/component_clipboard.h"
 
 #include "core/math_util.h"
 #include "scene/entity_manager.h"
 #include "scene/scene_loader.h"
+#include "scripting/script_registry.h"
 
 #include <imgui.h>
 
@@ -188,6 +191,46 @@ static void draw_nadir_colored(const std::string& text) {
 }
 
 // ---------------------------------------------------------------------------
+// Component card helper — renders a collapsible header with hamburger menu
+// ---------------------------------------------------------------------------
+
+static void draw_component_card_header(
+    const char* label,
+    bool removable,
+    bool& should_remove,
+    bool& should_reset,
+    bool& should_copy,
+    bool& should_paste)
+{
+    ImGuiTreeNodeFlags flags = ImGuiTreeNodeFlags_DefaultOpen |
+                              ImGuiTreeNodeFlags_AllowItemOverlap;
+    bool is_open = ImGui::CollapsingHeader(label, flags);
+
+    ImGui::SameLine(ImGui::GetWindowWidth() - 30);
+    ImGui::PushID(label);
+    if (ImGui::SmallButton("...")) {
+        ImGui::OpenPopup("component_menu");
+    }
+    ImGui::PopID();
+
+    if (ImGui::BeginPopup("component_menu")) {
+        if (removable && ImGui::MenuItem("Remove")) {
+            should_remove = true;
+        }
+        if (ImGui::MenuItem("Reset")) {
+            should_reset = true;
+        }
+        if (ImGui::MenuItem("Copy Values")) {
+            should_copy = true;
+        }
+        if (ImGui::MenuItem("Paste Values")) {
+            should_paste = true;
+        }
+        ImGui::EndPopup();
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Main draw
 // ---------------------------------------------------------------------------
 
@@ -247,12 +290,20 @@ void InspectorPanel::draw(EditorState& state) {
     auto* scene_data = static_cast<scene::SceneData*>(state.scene_data);
     auto* desc = find_desc_for_entity(scene_data, *e);
 
+    // --- Debug toggle ---
+    bool debug_mode = false;  // TODO: persist in EditorState if needed
+    ImGui::Checkbox("Debug", &debug_mode);
+    ImGui::SameLine();
+
     // Identity
     ImGui::TextColored(ImVec4(0.85f, 0.9f, 1.0f, 1), "%s", e->name.c_str());
-    ImGui::TextDisabled("id=%u  archetype=%s  active=%s  mode=%s",
-                        e->id, e->archetype.c_str(),
+    ImGui::TextDisabled("archetype=%s  active=%s  mode=%s",
+                        e->archetype.c_str(),
                         e->active ? "yes" : "no",
                         std::string{mode_label(state.mode)}.c_str());
+    if (debug_mode) {
+        ImGui::TextDisabled("id=%u", e->id);
+    }
     if (read_only) {
         ImGui::TextColored(ImVec4(1.0f, 0.70f, 0.45f, 1.0f),
                            "[read-only — switch to Edit mode to modify]");
@@ -263,9 +314,30 @@ void InspectorPanel::draw(EditorState& state) {
         if (scene_data) scene_data->mutated = true;
     };
 
-    // --- Transform ---
-    if (ImGui::CollapsingHeader("Transform", ImGuiTreeNodeFlags_DefaultOpen)) {
+    auto& clipboard = component_clipboard();
+
+    // --- Transform card ---
+    {
+        bool should_remove = false, should_reset = false;
+        bool should_copy = false, should_paste = false;
+        draw_component_card_header("Transform", false, should_remove, should_reset,
+                                   should_copy, should_paste);
+
         auto& t = e->components.transform;
+
+        if (should_copy) {
+            clipboard.transform = t;
+        }
+        if (should_paste && clipboard.transform) {
+            t = *clipboard.transform;
+            if (desc) desc->transform = t;
+            mark_mutated();
+        }
+        if (should_reset) {
+            t = Transform{};
+            if (desc) desc->transform = t;
+            mark_mutated();
+        }
 
         if (edit_vec3_drag("position", t.position, 0.1f, read_only)) {
             if (desc) desc->transform.position = t.position;
@@ -273,7 +345,6 @@ void InspectorPanel::draw(EditorState& state) {
         }
         hint_read_only_on_hover(read_only);
 
-        // Rotation: authored as Euler XYZ degrees, converted to/from quat.
         vec3 euler = quat_to_euler_xyz_deg(t.rotation);
         if (edit_vec3_drag("rotation (deg)", euler, 0.5f, read_only)) {
             t.rotation = euler_xyz_deg_to_quat(euler);
@@ -289,9 +360,34 @@ void InspectorPanel::draw(EditorState& state) {
         hint_read_only_on_hover(read_only);
     }
 
-    // --- Stats ---
-    if (ImGui::CollapsingHeader("Stats", ImGuiTreeNodeFlags_DefaultOpen)) {
+    // --- Stats card ---
+    if (e->components.stats.health > 0 || e->components.stats.max_health > 0 ||
+        e->components.stats.ammo > 0 || e->components.stats.speed > 0) {
+        bool should_remove = false, should_reset = false;
+        bool should_copy = false, should_paste = false;
+        draw_component_card_header("Stats", true, should_remove, should_reset,
+                                   should_copy, should_paste);
+
         auto& s = e->components.stats;
+
+        if (should_copy) {
+            clipboard.stats = s;
+        }
+        if (should_paste && clipboard.stats) {
+            s = *clipboard.stats;
+            if (desc) desc->stats = s;
+            mark_mutated();
+        }
+        if (should_reset) {
+            s = EntityStats{};
+            if (desc) desc->stats = s;
+            mark_mutated();
+        }
+        if (should_remove) {
+            s = EntityStats{};
+            if (desc) desc->stats = s;
+            mark_mutated();
+        }
 
         if (edit_float_drag("health", s.health, 1.0f, 0.0f, 99999.0f, read_only)) {
             if (desc) desc->stats.health = s.health;
@@ -313,49 +409,220 @@ void InspectorPanel::draw(EditorState& state) {
             mark_mutated();
         }
         hint_read_only_on_hover(read_only);
-
-        // voice_range is bounded [0, 50] by council decision.
-        if (edit_float_drag("voice_range (m)", e->components.voice_range,
-                            0.25f, 0.0f, 50.0f, read_only)) {
-            if (desc) desc->voice_range = e->components.voice_range;
-            mark_mutated();
-        }
-        hint_read_only_on_hover(read_only);
     }
 
-    // --- Mesh / Material ---
-    if (ImGui::CollapsingHeader("Mesh & Material", ImGuiTreeNodeFlags_DefaultOpen)) {
+    // --- Mesh Renderer card ---
+    if (!e->components.mesh_path.empty() || !e->components.material_path.empty()) {
+        bool should_remove = false, should_reset = false;
+        bool should_copy = false, should_paste = false;
+        draw_component_card_header("Mesh Renderer", true, should_remove, should_reset,
+                                   should_copy, should_paste);
+
+        if (should_copy) {
+            clipboard.mesh_path = e->components.mesh_path;
+            clipboard.material_path = e->components.material_path;
+        }
+        if (should_paste) {
+            if (clipboard.mesh_path) {
+                e->components.mesh_path = *clipboard.mesh_path;
+                if (desc) desc->mesh_src = e->components.mesh_path;
+            }
+            if (clipboard.material_path) {
+                e->components.material_path = *clipboard.material_path;
+                if (desc) desc->material_src = e->components.material_path;
+            }
+            mark_mutated();
+        }
+        if (should_reset) {
+            e->components.mesh_path.clear();
+            e->components.material_path.clear();
+            if (desc) {
+                desc->mesh_src.clear();
+                desc->material_src.clear();
+            }
+            mark_mutated();
+        }
+        if (should_remove) {
+            e->components.mesh_path.clear();
+            e->components.material_path.clear();
+            if (desc) {
+                desc->mesh_src.clear();
+                desc->material_src.clear();
+            }
+            mark_mutated();
+        }
+
         ImGui::TextDisabled("mesh"); ImGui::SameLine(140.0f);
         ImGui::Text("%s", e->components.mesh_path.empty() ? "<none>"
                                                           : e->components.mesh_path.c_str());
+
+        // F26 drag-drop target for mesh
+        if (ImGui::BeginDragDropTarget()) {
+            if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload("ASSET_MESH")) {
+                const char* path = static_cast<const char*>(payload->Data);
+                e->components.mesh_path = std::string(path, payload->DataSize);
+                if (desc) desc->mesh_src = e->components.mesh_path;
+                mark_mutated();
+            }
+            ImGui::EndDragDropTarget();
+        }
+
         ImGui::TextDisabled("material"); ImGui::SameLine(140.0f);
         ImGui::Text("%s", e->components.material_path.empty() ? "<none>"
                                                               : e->components.material_path.c_str());
+
+        // F26 drag-drop target for material
+        if (ImGui::BeginDragDropTarget()) {
+            if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload("ASSET_MATERIAL")) {
+                const char* path = static_cast<const char*>(payload->Data);
+                e->components.material_path = std::string(path, payload->DataSize);
+                if (desc) desc->material_src = e->components.material_path;
+                mark_mutated();
+            }
+            ImGui::EndDragDropTarget();
+        }
     }
 
-    // --- Behavior (read-only; edits live in the .nadir file) ---
+    // --- Behavior card ---
     if (!e->components.behavior_shader.empty()) {
-        if (ImGui::CollapsingHeader("Behavior", ImGuiTreeNodeFlags_DefaultOpen)) {
-            ImGui::TextDisabled("shader"); ImGui::SameLine(140.0f);
-            ImGui::Text("%s", e->components.behavior_shader.c_str());
+        bool should_remove = false, should_reset = false;
+        bool should_copy = false, should_paste = false;
+        draw_component_card_header("Behavior (Nadir)", true, should_remove,
+                                   should_reset, should_copy, should_paste);
+
+        if (should_copy) {
+            clipboard.behavior_shader = e->components.behavior_shader;
+        }
+        if (should_paste && clipboard.behavior_shader) {
+            e->components.behavior_shader = *clipboard.behavior_shader;
+            if (desc) desc->behavior_shader = e->components.behavior_shader;
+            mark_mutated();
+        }
+        if (should_reset) {
+            e->components.behavior_shader.clear();
+            if (desc) desc->behavior_shader.clear();
+            mark_mutated();
+        }
+        if (should_remove) {
+            e->components.behavior_shader.clear();
+            if (desc) desc->behavior_shader.clear();
+            mark_mutated();
+        }
+
+        ImGui::TextDisabled("shader"); ImGui::SameLine(140.0f);
+        ImGui::Text("%s", e->components.behavior_shader.c_str());
+
+        // F26 drag-drop target for behavior
+        if (ImGui::BeginDragDropTarget()) {
+            if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload("ASSET_BEHAVIOR")) {
+                const char* path = static_cast<const char*>(payload->Data);
+                e->components.behavior_shader = std::string(path, payload->DataSize);
+                if (desc) desc->behavior_shader = e->components.behavior_shader;
+                mark_mutated();
+            }
+            ImGui::EndDragDropTarget();
         }
     }
 
-    // --- Script (read-only) ---
+    // --- Script card (F30) ---
     if (!e->components.script_class.empty()) {
-        if (ImGui::CollapsingHeader("Script", ImGuiTreeNodeFlags_DefaultOpen)) {
-            ImGui::TextDisabled("class");  ImGui::SameLine(140.0f);
-            ImGui::Text("%s", e->components.script_class.c_str());
-            ImGui::TextDisabled("config"); ImGui::SameLine(140.0f);
-            ImGui::Text("%s", e->components.script_config.empty() ? "<none>"
-                                                                  : e->components.script_config.c_str());
+        bool should_remove = false, should_reset = false;
+        bool should_copy = false, should_paste = false;
+        draw_component_card_header("Script", true, should_remove, should_reset,
+                                   should_copy, should_paste);
+
+        if (should_copy) {
+            clipboard.script_class = e->components.script_class;
+            clipboard.script_config = e->components.script_config;
+        }
+        if (should_paste) {
+            if (clipboard.script_class) {
+                e->components.script_class = *clipboard.script_class;
+                if (desc) desc->script_class = e->components.script_class;
+            }
+            if (clipboard.script_config) {
+                e->components.script_config = *clipboard.script_config;
+                if (desc) desc->script_config = e->components.script_config;
+            }
+            mark_mutated();
+        }
+        if (should_reset) {
+            e->components.script_class.clear();
+            e->components.script_config.clear();
+            if (desc) {
+                desc->script_class.clear();
+                desc->script_config.clear();
+            }
+            mark_mutated();
+        }
+        if (should_remove) {
+            e->components.script_class.clear();
+            e->components.script_config.clear();
+            if (desc) {
+                desc->script_class.clear();
+                desc->script_config.clear();
+            }
+            mark_mutated();
+        }
+
+        ImGui::TextDisabled("class"); ImGui::SameLine(140.0f);
+        ImGui::Text("%s", e->components.script_class.c_str());
+        if (!read_only) {
+            ImGui::SameLine();
+            if (ImGui::SmallButton("Detach")) {
+                e->components.script_class.clear();
+                e->components.script_config.clear();
+                if (desc) {
+                    desc->script_class.clear();
+                    desc->script_config.clear();
+                }
+                mark_mutated();
+            }
+        }
+
+        ImGui::TextDisabled("config"); ImGui::SameLine(140.0f);
+        ImGui::SetNextItemWidth(-1.0f);
+        char config_buf[2048];
+        std::snprintf(config_buf, sizeof(config_buf), "%s",
+                     e->components.script_config.c_str());
+        ImGuiInputTextFlags flags = ImGuiInputTextFlags_None;
+        if (read_only) flags |= ImGuiInputTextFlags_ReadOnly;
+        if (ImGui::InputTextMultiline("##script_config", config_buf, sizeof(config_buf),
+                                       ImVec2(0, 80), flags)) {
+            e->components.script_config = config_buf;
+            if (desc) desc->script_config = e->components.script_config;
+            mark_mutated();
         }
     }
 
-    // --- Tags (Phase 4 schema-add ritual demonstration) ---
-    if (ImGui::CollapsingHeader("Tags", ImGuiTreeNodeFlags_DefaultOpen)) {
+    // --- Tags card ---
+    if (!e->components.tags.empty()) {
+        bool should_remove = false, should_reset = false;
+        bool should_copy = false, should_paste = false;
+        draw_component_card_header("Tags", true, should_remove, should_reset,
+                                   should_copy, should_paste);
+
         auto& tags = e->components.tags;
-        // Render each tag as an editable row + Remove button.
+
+        if (should_copy) {
+            clipboard.tags = tags;
+        }
+        if (should_paste && clipboard.tags) {
+            tags = *clipboard.tags;
+            if (desc) desc->tags = tags;
+            mark_mutated();
+        }
+        if (should_reset) {
+            tags.clear();
+            if (desc) desc->tags = tags;
+            mark_mutated();
+        }
+        if (should_remove) {
+            tags.clear();
+            if (desc) desc->tags = tags;
+            mark_mutated();
+        }
+
         int remove_idx = -1;
         for (size_t i = 0; i < tags.size(); ++i) {
             ImGui::PushID(static_cast<int>(i));
@@ -394,11 +661,120 @@ void InspectorPanel::draw(EditorState& state) {
         }
     }
 
-    // --- Prefab source ---
+    // --- Voice Source card ---
+    if (e->components.voice_range > 0.0f) {
+        bool should_remove = false, should_reset = false;
+        bool should_copy = false, should_paste = false;
+        draw_component_card_header("Voice Source", true, should_remove, should_reset,
+                                   should_copy, should_paste);
+
+        if (should_copy) {
+            clipboard.voice_range = e->components.voice_range;
+        }
+        if (should_paste && clipboard.voice_range) {
+            e->components.voice_range = *clipboard.voice_range;
+            if (desc) desc->voice_range = e->components.voice_range;
+            mark_mutated();
+        }
+        if (should_reset) {
+            e->components.voice_range = 25.0f;
+            if (desc) desc->voice_range = e->components.voice_range;
+            mark_mutated();
+        }
+        if (should_remove) {
+            e->components.voice_range = 0.0f;
+            if (desc) desc->voice_range = 0.0f;
+            mark_mutated();
+        }
+
+        if (edit_float_drag("voice_range (m)", e->components.voice_range,
+                            0.25f, 0.0f, 50.0f, read_only)) {
+            if (desc) desc->voice_range = e->components.voice_range;
+            mark_mutated();
+        }
+        hint_read_only_on_hover(read_only);
+    }
+
+    // --- Prefab Source card (read-only) ---
     if (!e->components.prefab_source.empty()) {
-        ImGui::Separator();
-        ImGui::TextDisabled("prefab"); ImGui::SameLine(140.0f);
+        ImGui::CollapsingHeader("Prefab Source", ImGuiTreeNodeFlags_DefaultOpen);
+        ImGui::TextDisabled("source"); ImGui::SameLine(140.0f);
         ImGui::Text("%s", e->components.prefab_source.c_str());
+    }
+
+    ImGui::Separator();
+
+    // --- Add Component button (F25) ---
+    if (!read_only) {
+        if (ImGui::Button("+ Add Component")) {
+            ImGui::OpenPopup("add_component_menu");
+        }
+
+        if (ImGui::BeginPopup("add_component_menu")) {
+            static char search_buf[128] = {};
+            ImGui::InputText("Search##add_comp", search_buf, sizeof(search_buf));
+
+            const auto& descriptors = all_component_descriptors();
+            for (const auto& comp_desc : descriptors) {
+                // Skip Transform and PrefabSource (not addable)
+                if (comp_desc.kind == ComponentKind::Transform ||
+                    comp_desc.kind == ComponentKind::PrefabSource) {
+                    continue;
+                }
+
+                // Skip if already present
+                if (comp_desc.is_present(*e)) {
+                    continue;
+                }
+
+                // Filter by search
+                if (search_buf[0] != '\0') {
+                    std::string label_lower = comp_desc.display_name;
+                    std::string search_lower = search_buf;
+                    std::transform(label_lower.begin(), label_lower.end(),
+                                  label_lower.begin(), ::tolower);
+                    std::transform(search_lower.begin(), search_lower.end(),
+                                  search_lower.begin(), ::tolower);
+                    if (label_lower.find(search_lower) == std::string::npos) {
+                        continue;
+                    }
+                }
+
+                if (ImGui::MenuItem(comp_desc.display_name.c_str())) {
+                    // Make a copy of the descriptor to call add
+                    const auto& descs = all_component_descriptors();
+                    auto add_it = std::find_if(descs.begin(), descs.end(),
+                        [&](const ComponentDescriptor& d) {
+                            return d.kind == comp_desc.kind;
+                        });
+                    if (add_it != descs.end()) {
+                        add_it->add(*e);
+                        if (desc) {
+                            // Mirror to SceneData
+                            if (comp_desc.kind == ComponentKind::Stats) {
+                                desc->stats = e->components.stats;
+                            } else if (comp_desc.kind == ComponentKind::MeshRenderer) {
+                                desc->mesh_src = e->components.mesh_path;
+                                desc->material_src = e->components.material_path;
+                            } else if (comp_desc.kind == ComponentKind::Behavior) {
+                                desc->behavior_shader = e->components.behavior_shader;
+                            } else if (comp_desc.kind == ComponentKind::Script) {
+                                desc->script_class = e->components.script_class;
+                                desc->script_config = e->components.script_config;
+                            } else if (comp_desc.kind == ComponentKind::Tags) {
+                                desc->tags = e->components.tags;
+                            } else if (comp_desc.kind == ComponentKind::VoiceSource) {
+                                desc->voice_range = e->components.voice_range;
+                            }
+                        }
+                        mark_mutated();
+                    }
+                    ImGui::CloseCurrentPopup();
+                }
+            }
+
+            ImGui::EndPopup();
+        }
     }
 
     ImGui::Separator();

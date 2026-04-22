@@ -28,4 +28,8 @@ namespace detail {
     const std::unordered_map<std::string, ScriptFactory>& get_registered_factories();
 }
 
+// Returns a list of all registered script class names. Used by the Inspector
+// to populate the "Attach Script" popup menu. Pure: examines the registry.
+std::vector<std::string> list_registered_script_classes();
+
 } // namespace odyssey::scripting
