@@ -590,3 +590,71 @@ Because Nadir behaviors are pure functions of their SSBO inputs, running the sam
 ```
 
 Round-trip is regression-tested against both `demo/showcase/showcase.scene.xml` (deep preserve-unknowns coverage) and `demo/scenes/shooter_arena.scene.xml` (shooter-shape regression) in `tests/unit/scene/test_scene_serializer.cpp`. The `mutated` flag flips SceneData into reconstruction-on-serialize -- this is the hook the Phase 4 Inspector edits will use.
+
+---
+
+## Bindless Descriptor Set Layout Contract (Phase 6)
+
+**Decision record:** `docs/decisions/2026-04-21-bindless-refactor.md`
+
+This section documents the descriptor set layout contract for the forward renderer. All future subsystems (terrain, particles, decals, UI) MUST slot into this scheme rather than inventing parallel descriptor designs.
+
+### Set Assignment
+
+| Set | Name | Contents | Update frequency |
+|-----|------|----------|-----------------|
+| 0 | Bindless textures | `sampler2D bindless_textures[16384]` | Per-texture-load (UPDATE_AFTER_BIND) |
+| 1 | Per-frame UBOs | camera, lighting, CRT params | Once per frame |
+| — | Push constants | MVP (mat4), color (vec4), material_index (uint) | Per draw call |
+
+### Set=0 Layout Details
+
+- `binding=0`: `VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER` array of `MAX_BINDLESS_TEXTURES=16384`
+- Flags: `VK_DESCRIPTOR_BINDING_UPDATE_AFTER_BIND_BIT | VK_DESCRIPTOR_BINDING_PARTIALLY_BOUND_BIT | VK_DESCRIPTOR_BINDING_VARIABLE_DESCRIPTOR_COUNT_BIT`
+- Pool flag: `VK_DESCRIPTOR_POOL_CREATE_UPDATE_AFTER_BIND_BIT`
+- **Slot 0**: 1×1 magenta sentinel (RGBA 1,0,1,1). Never allocatable.
+- Isolation: compute descriptor sets (Nadir 7-SSBO layout) and PostProcessor sets are disjoint from set=0.
+
+### Static Sampler Table (set=0, binding=0 uses these via the registry)
+
+| Slot | Filter | Address | Anisotropy |
+|------|--------|---------|-----------|
+| 0 | Linear | Repeat | No |
+| 1 | Linear | Clamp | No |
+| 2 | Linear | Mirror | No |
+| 3 | Linear | Repeat | Yes (16×) |
+| 4 | Nearest | Repeat | No |
+| 5 | Nearest | Clamp | No |
+| 6 | Nearest | Mirror | No |
+| 7–15 | Reserved for lighting LUTs, shadow PCF, etc. | | |
+
+### Material Index Buffer (std430)
+
+`MaterialGPU` (32 bytes, std430):
+
+```cpp
+struct MaterialGPU {
+    float    albedo_r;         // offset 0
+    float    albedo_g;         // offset 4
+    float    albedo_b;         // offset 8
+    float    albedo_a;         // offset 12
+    uint32_t albedo_tex_index; // offset 16: 0=sentinel, else bindless slot
+    uint32_t _pad[3];          // offset 20..31
+};
+```
+
+### Phase-6+N Slot Reservations (documented, not yet allocated)
+
+- Shadow map atlas array: 1 slot
+- 3D LUT grade textures per LightingProfile: 6 slots (one per profile)
+- Volumetric froxel volume: 1 slot (3D texture, single bindless slot)
+
+These are planned reservation ranges for the lighting-mood-architect's follow-on.
+Actual allocation happens when those phases land, not here.
+
+### Isolation Boundaries
+
+- `src/nadir/`: compute descriptor pools **never** share the bindless pool. Graphics and compute pools are disjoint (game-ai-engineer condition).
+- `src/vulkan/postprocess.cpp`: PostProcessor stays on its own descriptor sets, untouched by this refactor.
+- `src/audio/`: zero changes (Marty condition).
+- `src/net/`: zero changes (netcode abstain condition).

@@ -16,6 +16,10 @@ struct OverlayConfig {
     bool show_entity_inspector = false;
     bool show_nadir_inspector = false;
     bool show_network_stats = false;
+    /// Phase 6: visualize bindless slot index as false-color per fragment.
+    /// Zero runtime cost when false (the uniform is simply 0u).
+    /// Toggle via F9 or `show_bindless_debug = true`.
+    bool show_bindless_debug = false;
     float overlay_alpha = 0.8f;
 };
 
@@ -65,6 +69,13 @@ public:
     void set_network_info(const NetworkDebugInfo& info) { net_info_ = info; }
     void set_entity_count(uint32_t count) { entity_count_ = count; }
 
+    /// Phase 6: feed bindless slot occupancy for the debug panel.
+    /// When show_bindless_debug is true, overlay renders occupancy stats + false-color note.
+    void set_bindless_stats(uint32_t used_slots, uint32_t total_slots) {
+        bindless_used_  = used_slots;
+        bindless_total_ = total_slots;
+    }
+
     // Toggle panels
     OverlayConfig& config() { return config_; }
 
@@ -77,11 +88,14 @@ private:
     void draw_entity_inspector();
     void draw_nadir_inspector();
     void draw_network_panel();
+    void draw_bindless_panel();
 
     const Profiler* profiler_ = nullptr;
     NadirDebugInfo nadir_info_;
     NetworkDebugInfo net_info_;
-    uint32_t entity_count_ = 0;
+    uint32_t entity_count_   = 0;
+    uint32_t bindless_used_  = 0;
+    uint32_t bindless_total_ = 0;
 
     OverlayConfig config_;
     bool overlay_visible_ = true;

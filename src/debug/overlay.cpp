@@ -18,6 +18,7 @@
 #define GLFW_KEY_F3 292
 #define GLFW_KEY_F4 293
 #define GLFW_KEY_F5 294
+#define GLFW_KEY_F9 298
 #define GLFW_PRESS 1
 #endif
 #endif
@@ -167,6 +168,9 @@ void DebugOverlay::begin_frame() {
     if (config_.show_network_stats) {
         draw_network_panel();
     }
+    if (config_.show_bindless_debug) {
+        draw_bindless_panel();
+    }
 #endif
 }
 
@@ -208,6 +212,11 @@ void DebugOverlay::handle_key(int key, int action) {
             break;
         case GLFW_KEY_F5:
             config_.show_network_stats = !config_.show_network_stats;
+            break;
+        case GLFW_KEY_F9:
+            // Phase 6: toggle bindless debug panel (false-color slot indices).
+            config_.show_bindless_debug = !config_.show_bindless_debug;
+            spdlog::debug("Bindless debug overlay {}", config_.show_bindless_debug ? "on" : "off");
             break;
         default:
             break;
@@ -405,6 +414,52 @@ void DebugOverlay::draw_network_panel() {
         } else {
             ImGui::TextColored(ImVec4(1.0f, 0.3f, 0.3f, 1.0f), "Disconnected");
         }
+    }
+    ImGui::End();
+#endif
+}
+
+// ---------------------------------------------------------------------------
+// draw_bindless_panel (Phase 6)
+// ---------------------------------------------------------------------------
+
+void DebugOverlay::draw_bindless_panel() {
+#if ODYSSEY_HAS_IMGUI
+    // Phase 6: debug overlay showing bindless slot occupancy and a note
+    // describing the false-color visualization mode.
+    //
+    // False-color derivation: slot index i maps to hue = (i / MAX_BINDLESS_TEXTURES) * 360°
+    // converted to RGB via HSV→RGB.  At slot 0 (sentinel) hue=0 → red (magenta in the
+    // shader since the sentinel pixel is RGBA 1,0,1,1).  This lets artists verify
+    // that no unloaded slot is being sampled in a scene.  Zero runtime cost when the
+    // overlay is hidden — the toggle only affects the overlay widget, not the shader.
+    // (In a future Phase, a push-constant flag could redirect the shader to output
+    // slot-index false-color instead of lit color; that would require a council vote
+    // to add the push-constant field — flagged here as a follow-on.)
+
+    ImGui::SetNextWindowSize(ImVec2(320, 160), ImGuiCond_FirstUseEver);
+
+    if (ImGui::Begin("Bindless Textures", &config_.show_bindless_debug)) {
+        uint32_t free_slots = bindless_total_ > bindless_used_ ?
+                              (bindless_total_ - bindless_used_) : 0u;
+        float pct = bindless_total_ > 0 ?
+                    static_cast<float>(bindless_used_) / static_cast<float>(bindless_total_) : 0.0f;
+
+        ImGui::Text("Capacity: %u", bindless_total_);
+        ImGui::Text("Used:     %u (%.1f%%)", bindless_used_, pct * 100.0f);
+        ImGui::Text("Free:     %u", free_slots);
+
+        ImGui::Separator();
+
+        // Progress bar for occupancy.
+        char overlay_text[64];
+        snprintf(overlay_text, sizeof(overlay_text), "%u / %u", bindless_used_, bindless_total_);
+        ImGui::ProgressBar(pct, ImVec2(-1.0f, 0.0f), overlay_text);
+
+        ImGui::Separator();
+        ImGui::TextDisabled("Slot 0: [magenta sentinel]");
+        ImGui::TextDisabled("F9: toggle this panel");
+        ImGui::TextDisabled("False-color shader mode: Phase 7 (follow-on)");
     }
     ImGui::End();
 #endif

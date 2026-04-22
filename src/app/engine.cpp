@@ -19,6 +19,7 @@
 #   include "vulkan/compute_pipeline.h"
 #   include "vulkan/renderer.h"
 #   include "vulkan/postprocess.h"
+#   include "vulkan/bindless_texture_registry.h"
 #   define ODYSSEY_HAS_VULKAN 1
 #else
 #   define ODYSSEY_HAS_VULKAN 0
@@ -77,6 +78,12 @@ struct Engine::Impl {
     vulkan::Renderer                  renderer;
     vulkan::PostProcessor             postprocessor;
     bool                              has_postprocessor = false;
+
+    // Bindless texture registry — set=0, lifetime matches the Vulkan device.
+    // Initialized after the device (needs DeviceContext + command pool) and
+    // before the renderer (renderer.attach_bindless_registry must precede
+    // renderer.initialize so the pipeline layout includes set=0).
+    vulkan::BindlessTextureRegistry   bindless_registry;
 #endif
 
 #if ODYSSEY_HAS_NADIR
@@ -372,7 +379,7 @@ Result<bool> Engine::init_vulkan(const EngineConfig& config) {
     auto dev_cfg = vulkan::select_physical_device(
         impl_->instance, impl_->surface, config.gpu_index);
     auto dev_res = vulkan::create_device(dev_cfg, impl_->instance);
-    if (dev_res.is_err()) return Result<bool>::err(dev_res.error());
+    if (dev_res.is_err()) return Result<bool>::err(vulkan::device_create_err_to_string(dev_res.error()));
     impl_->device_ctx = dev_res.value();
 
     // 4. Swapchain — compute config from surface capabilities
@@ -452,8 +459,27 @@ Result<bool> Engine::init_vulkan(const EngineConfig& config) {
         }
     }
 
-    // 9. Renderer — creates graphics pipeline, primitive meshes
+    // 9. Bindless texture registry — must come after device + command pool
+    //    are ready, and before renderer.initialize() which bakes set=0 into
+    //    the pipeline layout.  initialize() uploads the 1×1 magenta sentinel
+    //    to slot 0 so any unresolved material_index=0 renders magenta rather
+    //    than sampling undefined memory.
     {
+        auto br_res = impl_->bindless_registry.initialize(
+            impl_->device_ctx, impl_->command_pool);
+        if (br_res.is_err()) {
+            return Result<bool>::err(
+                "BindlessTextureRegistry init failed: " + br_res.error());
+        }
+        spdlog::info("BindlessTextureRegistry ready ({} slots, sentinel uploaded)",
+                     impl_->bindless_registry.capacity());
+    }
+
+    // 10. Renderer — attach bindless registry BEFORE initialize() so the
+    //     pipeline layout includes set=0.  If attach is omitted the renderer
+    //     falls back to push-constant-color only (no bindless sample).
+    {
+        impl_->renderer.attach_bindless_registry(&impl_->bindless_registry);
         auto ren_res = impl_->renderer.initialize(
             impl_->device_ctx, impl_->swapchain_ctx, impl_->command_pool);
         if (ren_res.is_err()) return Result<bool>::err(ren_res.error());
@@ -925,8 +951,14 @@ void Engine::shutdown_vulkan() {
 
     vkDeviceWaitIdle(dev);
 
-    // Renderer
+    // Renderer (must shut down before bindless_registry — it holds a
+    // non-owning pointer to the registry's descriptor set).
     impl_->renderer.shutdown();
+
+    // Bindless texture registry — shut down after the renderer (which used
+    // the descriptor set) but before the command pool + VMA allocator (which
+    // it owns internally via its staging upload path).
+    impl_->bindless_registry.shutdown();
 
     // PostProcessor
     if (impl_->has_postprocessor) {
