@@ -1,6 +1,9 @@
 #pragma once
 #include "core/types.h"
 #include "core/result.h"
+#include "physics/rigid_body.h"
+#include "physics/colliders.h"
+#include "scene/camera_component.h"
 #include <string>
 #include <vector>
 #include <unordered_map>
@@ -37,6 +40,16 @@ struct EntityComponents {
     //   <tag name="..."/>
     // repeated children on <entity>. Inspector exposes an Add/Remove UI.
     std::vector<std::string> tags;
+
+    // Phase 9: Physics + collision components (optional, per-entity basis)
+    std::optional<physics::RigidBody> rigidbody;
+    std::optional<physics::BoxCollider> box_collider;
+    std::optional<physics::SphereCollider> sphere_collider;
+    std::optional<physics::CapsuleCollider> capsule_collider;
+    // std::optional<physics::MeshCollider> mesh_collider;  // TODO: Phase 9+
+
+    // Phase 9: Camera component (optional, marks entity as a render target)
+    std::optional<CameraComponent> camera;
 };
 
 // A single entity instance

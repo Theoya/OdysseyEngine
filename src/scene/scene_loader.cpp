@@ -33,7 +33,9 @@ static const std::unordered_set<std::string>& known_entity_children() {
         "script", "spawn_region", "pack",
         // Phase 4: <tag name="..."/> is a known child. Consumed into
         // EntityDesc::tags; serialized back in insertion order.
-        "tag"
+        "tag",
+        // Phase 9: Physics and camera components
+        "rigidbody", "box_collider", "sphere_collider", "capsule_collider", "camera"
     };
     return s;
 }
@@ -266,6 +268,57 @@ static Result<bool> parse_entity_node(const pugi::xml_node& entity_node,
         desc.tags.emplace_back(tag_node.attribute("name").as_string(""));
     }
 
+    // Phase 9: Parse optional physics + camera components
+    if (auto rb_node = entity_node.child("rigidbody")) {
+        auto rb_result = parse_rigidbody(rb_node);
+        if (rb_result.is_err()) {
+            return Result<bool>::err(
+                std::string("entity '") + (desc.id.empty() ? desc.archetype : desc.id) +
+                "': " + rb_result.error());
+        }
+        desc.rigidbody = std::move(rb_result).value();
+    }
+
+    if (auto bc_node = entity_node.child("box_collider")) {
+        auto bc_result = parse_box_collider(bc_node);
+        if (bc_result.is_err()) {
+            return Result<bool>::err(
+                std::string("entity '") + (desc.id.empty() ? desc.archetype : desc.id) +
+                "': " + bc_result.error());
+        }
+        desc.box_collider = std::move(bc_result).value();
+    }
+
+    if (auto sc_node = entity_node.child("sphere_collider")) {
+        auto sc_result = parse_sphere_collider(sc_node);
+        if (sc_result.is_err()) {
+            return Result<bool>::err(
+                std::string("entity '") + (desc.id.empty() ? desc.archetype : desc.id) +
+                "': " + sc_result.error());
+        }
+        desc.sphere_collider = std::move(sc_result).value();
+    }
+
+    if (auto cc_node = entity_node.child("capsule_collider")) {
+        auto cc_result = parse_capsule_collider(cc_node);
+        if (cc_result.is_err()) {
+            return Result<bool>::err(
+                std::string("entity '") + (desc.id.empty() ? desc.archetype : desc.id) +
+                "': " + cc_result.error());
+        }
+        desc.capsule_collider = std::move(cc_result).value();
+    }
+
+    if (auto cam_node = entity_node.child("camera")) {
+        auto cam_result = parse_camera(cam_node);
+        if (cam_result.is_err()) {
+            return Result<bool>::err(
+                std::string("entity '") + (desc.id.empty() ? desc.archetype : desc.id) +
+                "': " + cam_result.error());
+        }
+        desc.camera = std::move(cam_result).value();
+    }
+
     // Capture unknown element children.
     const auto& known_child = known_entity_children();
     for (auto child : entity_node.children()) {
@@ -413,6 +466,12 @@ void populate_entities(EntityManager& manager, const SceneData& scene) {
                 entity->components.script_config = desc.script_config;
                 entity->components.voice_range = desc.voice_range;
                 entity->components.tags = desc.tags;
+                // Phase 9: Physics + camera components
+                entity->components.rigidbody = desc.rigidbody;
+                entity->components.box_collider = desc.box_collider;
+                entity->components.sphere_collider = desc.sphere_collider;
+                entity->components.capsule_collider = desc.capsule_collider;
+                entity->components.camera = desc.camera;
                 // Phase 9: parent_id will be resolved after all entities created
             }
         } else {
@@ -433,6 +492,12 @@ void populate_entities(EntityManager& manager, const SceneData& scene) {
                 entity->components.script_config = desc.script_config;
                 entity->components.voice_range = desc.voice_range;
                 entity->components.tags = desc.tags;
+                // Phase 9: Physics + camera components
+                entity->components.rigidbody = desc.rigidbody;
+                entity->components.box_collider = desc.box_collider;
+                entity->components.sphere_collider = desc.sphere_collider;
+                entity->components.capsule_collider = desc.capsule_collider;
+                entity->components.camera = desc.camera;
 
                 // Offset positions for batch spawning within the spawn region
                 if (!desc.spawn_type.empty() && desc.spawn_radius > 0.0f) {
@@ -513,6 +578,122 @@ std::vector<std::filesystem::path> find_scene_files(const std::filesystem::path&
 
     spdlog::debug("Found {} scene files in '{}'", results.size(), dir.string());
     return results;
+}
+
+// --- Phase 9: Component parsers (pure functions) ---
+
+Result<physics::RigidBody> parse_rigidbody(const pugi::xml_node& node) {
+    physics::RigidBody rb;
+
+    rb.mass = node.attribute("mass").as_float(1.0f);
+    if (rb.mass <= 0.0f) {
+        return Result<physics::RigidBody>::err("rigidbody mass must be > 0");
+    }
+
+    rb.drag = node.attribute("drag").as_float(0.01f);
+    if (rb.drag < 0.0f) {
+        return Result<physics::RigidBody>::err("rigidbody drag must be >= 0");
+    }
+
+    rb.angular_drag = node.attribute("angular_drag").as_float(0.05f);
+    if (rb.angular_drag < 0.0f) {
+        return Result<physics::RigidBody>::err("rigidbody angular_drag must be >= 0");
+    }
+
+    rb.use_gravity = node.attribute("use_gravity").as_bool(true);
+    rb.is_kinematic = node.attribute("is_kinematic").as_bool(false);
+
+    // Optional position/velocity overrides
+    if (auto pos_attr = node.attribute("position")) {
+        rb.position = parse_vec3(pos_attr.as_string(), {0.0f, 0.0f, 0.0f});
+    }
+    if (auto vel_attr = node.attribute("velocity")) {
+        rb.velocity = parse_vec3(vel_attr.as_string(), {0.0f, 0.0f, 0.0f});
+    }
+
+    return Result<physics::RigidBody>::ok(rb);
+}
+
+Result<physics::BoxCollider> parse_box_collider(const pugi::xml_node& node) {
+    physics::BoxCollider bc;
+
+    if (auto center_attr = node.attribute("center")) {
+        bc.center = parse_vec3(center_attr.as_string(), {0.0f, 0.0f, 0.0f});
+    }
+
+    if (auto half_ext_attr = node.attribute("half_extents")) {
+        bc.half_extents = parse_vec3(half_ext_attr.as_string(), {0.5f, 0.5f, 0.5f});
+    }
+
+    if (bc.half_extents.x <= 0.0f || bc.half_extents.y <= 0.0f || bc.half_extents.z <= 0.0f) {
+        return Result<physics::BoxCollider>::err("box_collider half_extents must be > 0");
+    }
+
+    return Result<physics::BoxCollider>::ok(bc);
+}
+
+Result<physics::SphereCollider> parse_sphere_collider(const pugi::xml_node& node) {
+    physics::SphereCollider sc;
+
+    if (auto center_attr = node.attribute("center")) {
+        sc.center = parse_vec3(center_attr.as_string(), {0.0f, 0.0f, 0.0f});
+    }
+
+    sc.radius = node.attribute("radius").as_float(0.5f);
+    if (sc.radius <= 0.0f) {
+        return Result<physics::SphereCollider>::err("sphere_collider radius must be > 0");
+    }
+
+    return Result<physics::SphereCollider>::ok(sc);
+}
+
+Result<physics::CapsuleCollider> parse_capsule_collider(const pugi::xml_node& node) {
+    physics::CapsuleCollider cc;
+
+    if (auto center_attr = node.attribute("center")) {
+        cc.center = parse_vec3(center_attr.as_string(), {0.0f, 0.0f, 0.0f});
+    }
+
+    cc.radius = node.attribute("radius").as_float(0.4f);
+    if (cc.radius <= 0.0f) {
+        return Result<physics::CapsuleCollider>::err("capsule_collider radius must be > 0");
+    }
+
+    cc.height = node.attribute("height").as_float(1.8f);
+    if (cc.height <= 0.0f) {
+        return Result<physics::CapsuleCollider>::err("capsule_collider height must be > 0");
+    }
+
+    // Capsule constraint: height >= 2 * radius
+    if (cc.height < 2.0f * cc.radius) {
+        return Result<physics::CapsuleCollider>::err(
+            "capsule_collider height must be >= 2 * radius");
+    }
+
+    return Result<physics::CapsuleCollider>::ok(cc);
+}
+
+Result<CameraComponent> parse_camera(const pugi::xml_node& node) {
+    CameraComponent cam;
+
+    cam.fov = node.attribute("fov").as_float(70.0f);
+    if (cam.fov <= 0.0f || cam.fov >= 180.0f) {
+        return Result<CameraComponent>::err("camera fov must be in (0, 180)");
+    }
+
+    cam.near_plane = node.attribute("near").as_float(0.1f);
+    if (cam.near_plane <= 0.0f) {
+        return Result<CameraComponent>::err("camera near must be > 0");
+    }
+
+    cam.far_plane = node.attribute("far").as_float(1000.0f);
+    if (cam.far_plane <= cam.near_plane) {
+        return Result<CameraComponent>::err("camera far must be > near");
+    }
+
+    cam.is_main = node.attribute("is_main").as_bool(false);
+
+    return Result<CameraComponent>::ok(cam);
 }
 
 } // namespace odyssey::scene
