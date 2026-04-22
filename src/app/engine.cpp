@@ -49,6 +49,10 @@
 #include "app/input.h"
 #include "app/game.h"
 #include "scene/entity_manager.h"
+#include "scene/scene_loader.h"
+#include "assets/lighting_profile_loader.h"
+
+#include <optional>
 
 #include <glm/gtc/matrix_transform.hpp>
 
@@ -84,6 +88,11 @@ struct Engine::Impl {
     scene::EntityManager              entity_mgr;
     EngineConfig                      config;
     std::unique_ptr<Game>             game;
+
+    // Lighting profile loaded at scene-open time.
+    // Absent when the scene has no lighting_profile attribute or when
+    // loading fails (error is logged and engine continues unaffected).
+    std::optional<assets::LightingProfileData> active_lighting_profile;
 };
 
 // ---------------------------------------------------------------------------
@@ -232,6 +241,52 @@ Result<bool> Engine::initialize(const EngineConfig& config,
             spdlog::info("Game initialized: {} renderables",
                          impl_->game->get_renderables().size());
         }
+    }
+
+    // --- Resolve lighting profile from scene attributes ---
+    // If the scene file was specified, load it now (purely for attribute
+    // inspection — entity population was already handled by the Game).
+    // The scene_loader call here is a cheap re-parse; SceneData is
+    // pure data with no GPU dependency.
+    if (!config.scene_path.empty()) {
+        auto scene_res = scene::load_scene_file(config.scene_path);
+        if (scene_res.is_ok()) {
+            const auto& scene_data = scene_res.value();
+            // Look for lighting_profile="<name>" in unknown_scene_attributes.
+            for (const auto& [key, value] : scene_data.unknown_scene_attributes) {
+                if (key == "lighting_profile" && !value.empty()) {
+                    spdlog::info("Engine: resolving lighting profile '{}'", value);
+                    const auto scene_dir =
+                        std::filesystem::path(config.scene_path).parent_path();
+                    const auto candidates =
+                        assets::resolve_lighting_profile_path(value, scene_dir);
+                    bool loaded = false;
+                    for (const auto& candidate : candidates) {
+                        if (!std::filesystem::exists(candidate)) continue;
+                        auto prof_res = assets::load_lighting_profile_file(candidate);
+                        if (prof_res.is_ok()) {
+                            impl_->active_lighting_profile = std::move(prof_res.value());
+                            spdlog::info("Engine: lighting profile '{}' loaded from '{}'",
+                                         value, candidate.string());
+                            loaded = true;
+                            break;
+                        } else {
+                            spdlog::warn("Engine: lighting profile load failed for '{}': "
+                                         "error code {}",
+                                         candidate.string(),
+                                         static_cast<uint32_t>(prof_res.error()));
+                        }
+                    }
+                    if (!loaded) {
+                        spdlog::warn("Engine: no valid lighting profile found for name '{}' "
+                                     "— rendering with engine defaults", value);
+                    }
+                    break;
+                }
+            }
+        }
+        // Scene load failure here is non-fatal: the Game already loaded the
+        // scene for entity population; this second pass is only for metadata.
     }
 
     running_ = true;
@@ -616,6 +671,18 @@ void Engine::process_frame(float delta_time) {
             crt.flicker_amount = 0.2f + hud.flicker_boost;
             crt.curvature = 2.0f + hud.curvature_boost;
             crt.vignette_strength = 0.8f + hud.vignette_boost;
+
+            // Overlay the scene's lighting profile on top of the HUD-adjusted
+            // base CRT params.  profile_to_crt_params is pure — it reads
+            // base_crt (which already incorporates HUDParams boosts) and
+            // returns a new CRTParams with the profile's photographic intent
+            // applied (exposure scale, vignette replacement, grain→flicker).
+            if (impl_->active_lighting_profile.has_value()) {
+                crt = assets::profile_to_crt_params(
+                    crt, impl_->active_lighting_profile.value());
+                eva = assets::profile_to_eva_params(
+                    eva, impl_->active_lighting_profile.value());
+            }
 
             impl_->postprocessor.apply(cmd, image_index, crt, eva);
         }
