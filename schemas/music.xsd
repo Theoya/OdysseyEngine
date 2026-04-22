@@ -1,0 +1,132 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema"
+           targetNamespace="https://odysseyengine.dev/music"
+           xmlns:od="https://odysseyengine.dev/music"
+           elementFormDefault="qualified">
+
+  <xs:element name="music" type="od:MusicType"/>
+
+  <xs:complexType name="MusicType">
+    <xs:sequence>
+      <xs:element name="themes"      type="od:ThemesType"      minOccurs="1"/>
+      <xs:element name="music_state" type="od:MusicStateType"  minOccurs="1" maxOccurs="unbounded"/>
+      <xs:element name="leitmotif"   type="od:LeitmotifType"   minOccurs="0" maxOccurs="unbounded"/>
+      <xs:element name="stinger"     type="od:StingerType"     minOccurs="0" maxOccurs="unbounded"/>
+    </xs:sequence>
+    <xs:attribute name="bpm" type="od:PositiveFloat" use="required"/>
+    <xs:attribute name="key" type="xs:string"        use="required"/>
+    <xs:attribute name="version" type="xs:positiveInteger" default="1"/>
+  </xs:complexType>
+
+  <xs:complexType name="ThemesType">
+    <xs:sequence>
+      <xs:element name="theme" type="od:ThemeType" minOccurs="1" maxOccurs="unbounded"/>
+    </xs:sequence>
+  </xs:complexType>
+
+  <xs:complexType name="ThemeType">
+    <xs:attribute name="id"   type="xs:nonNegativeInteger" use="required"/>
+    <xs:attribute name="mood" type="od:MoodTag"            use="required"/>
+    <xs:attribute name="description" type="xs:string" default=""/>
+  </xs:complexType>
+
+  <xs:complexType name="MusicStateType">
+    <xs:sequence>
+      <xs:element name="layer" type="od:LayerType" minOccurs="1" maxOccurs="unbounded"/>
+    </xs:sequence>
+    <xs:attribute name="id"   type="xs:nonNegativeInteger" use="required"/>
+    <xs:attribute name="mood_tag" type="od:MoodTag" use="required"/>
+    <xs:attribute name="lighting_profile_ref" type="xs:string" default=""/>
+  </xs:complexType>
+
+  <xs:complexType name="LayerType">
+    <xs:attribute name="stem_path"      type="xs:string"       use="required"/>
+    <xs:attribute name="intensity_min"  type="od:UnitFloat"    use="required"/>
+    <xs:attribute name="intensity_max"  type="od:UnitFloat"    use="required"/>
+    <xs:attribute name="pan_L"          type="od:UnitFloat"    default="0.7071"/>
+    <xs:attribute name="pan_R"          type="od:UnitFloat"    default="0.7071"/>
+    <xs:attribute name="label"          type="xs:string"       default=""/>
+  </xs:complexType>
+
+  <xs:complexType name="LeitmotifType">
+    <xs:sequence>
+      <xs:element name="augmentation"    type="od:AugmentationType"    minOccurs="0"/>
+      <xs:element name="instrumentation" type="od:InstrumentationType" minOccurs="0"/>
+      <xs:element name="reharmonization" type="od:ReharmonizationType" minOccurs="0"/>
+    </xs:sequence>
+    <xs:attribute name="id"                  type="xs:string"        use="required"/>
+    <xs:attribute name="source_clip"        type="xs:string"        use="required"/>
+    <xs:attribute name="emotional_register" type="od:EmotionalRegister" use="required"/>
+    <xs:attribute name="permitted_contexts" type="xs:string"        use="required"/>
+    <xs:attribute name="min_reentry_bars"   type="xs:nonNegativeInteger" default="4"/>
+  </xs:complexType>
+
+  <xs:complexType name="AugmentationType">
+    <xs:attribute name="interval_semitones" type="xs:integer" use="required"/>
+  </xs:complexType>
+
+  <xs:complexType name="InstrumentationType">
+    <xs:attribute name="swap_from" type="xs:string" use="required"/>
+    <xs:attribute name="swap_to"   type="xs:string" use="required"/>
+  </xs:complexType>
+
+  <xs:complexType name="ReharmonizationType">
+    <xs:attribute name="root_motion" type="xs:string" use="required"/>
+  </xs:complexType>
+
+  <xs:complexType name="StingerType">
+    <xs:attribute name="id"                 type="xs:nonNegativeInteger" use="required"/>
+    <xs:attribute name="source_clip"        type="xs:string"           use="required"/>
+    <xs:attribute name="intent"             type="od:StingerIntent"    use="required"/>
+    <xs:attribute name="min_silence_bars"   type="xs:nonNegativeInteger" default="1"/>
+    <xs:attribute name="bpm_override"       type="od:PositiveFloat"    default=""/>
+  </xs:complexType>
+
+  <xs:simpleType name="MoodTag">
+    <xs:restriction base="xs:string">
+      <xs:enumeration value="dread"/>
+      <xs:enumeration value="hostile"/>
+      <xs:enumeration value="liminal"/>
+      <xs:enumeration value="sacred"/>
+      <xs:enumeration value="warmth"/>
+      <xs:enumeration value="wonder"/>
+      <xs:enumeration value="neutral"/>
+    </xs:restriction>
+  </xs:simpleType>
+
+  <xs:simpleType name="EmotionalRegister">
+    <xs:restriction base="xs:string">
+      <xs:enumeration value="triumphant"/>
+      <xs:enumeration value="ominous"/>
+      <xs:enumeration value="tender"/>
+      <xs:enumeration value="heroic"/>
+      <xs:enumeration value="wistful"/>
+      <xs:enumeration value="playful"/>
+      <xs:enumeration value="neutral"/>
+    </xs:restriction>
+  </xs:simpleType>
+
+  <xs:simpleType name="StingerIntent">
+    <xs:restriction base="xs:string">
+      <xs:enumeration value="reveal"/>
+      <xs:enumeration value="punctuate"/>
+      <xs:enumeration value="transition"/>
+      <xs:enumeration value="sting"/>
+      <xs:enumeration value="release"/>
+    </xs:restriction>
+  </xs:simpleType>
+
+  <xs:simpleType name="PositiveFloat">
+    <xs:restriction base="xs:float">
+      <xs:minExclusive value="0.0"/>
+    </xs:restriction>
+  </xs:simpleType>
+
+  <xs:simpleType name="UnitFloat">
+    <xs:restriction base="xs:float">
+      <xs:minInclusive value="0.0"/>
+      <xs:maxInclusive value="1.0"/>
+    </xs:restriction>
+  </xs:simpleType>
+
+</xs:schema>
