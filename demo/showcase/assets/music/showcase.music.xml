@@ -1,0 +1,52 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<music bpm="120.0" key="C major" version="1"
+       xmlns="https://odysseyengine.dev/music">
+
+  <themes>
+    <theme id="0" mood="dread" description="Dark, ominous overture"/>
+    <theme id="1" mood="hostile" description="Aggressive battle theme"/>
+    <theme id="2" mood="liminal" description="Eerie, uncertain spaces"/>
+    <theme id="3" mood="sacred" description="Solemn, reverent mood"/>
+    <theme id="4" mood="warmth" description="Hopeful, comforting tone"/>
+    <theme id="5" mood="wonder" description="Awe-inspiring, expansive"/>
+  </themes>
+
+  <music_state id="0" mood_tag="dread" lighting_profile_ref="dread">
+    <layer stem_path="demo/showcase/assets/music/stems/dread_base.wav"
+            intensity_min="0.3" intensity_max="0.9" pan_L="0.7071" pan_R="0.7071"/>
+  </music_state>
+
+  <music_state id="1" mood_tag="hostile" lighting_profile_ref="hostile">
+    <layer stem_path="demo/showcase/assets/music/stems/hostile_base.wav"
+            intensity_min="0.5" intensity_max="1.0"/>
+  </music_state>
+
+  <music_state id="2" mood_tag="liminal" lighting_profile_ref="liminal">
+    <layer stem_path="demo/showcase/assets/music/stems/liminal_base.wav"
+            intensity_min="0.0" intensity_max="0.7"/>
+  </music_state>
+
+  <music_state id="3" mood_tag="sacred" lighting_profile_ref="sacred">
+    <layer stem_path="demo/showcase/assets/music/stems/sacred_base.wav"
+            intensity_min="0.4" intensity_max="0.8"/>
+  </music_state>
+
+  <music_state id="4" mood_tag="warmth" lighting_profile_ref="warmth">
+    <layer stem_path="demo/showcase/assets/music/stems/warmth_base.wav"
+            intensity_min="0.3" intensity_max="0.9"/>
+  </music_state>
+
+  <music_state id="5" mood_tag="wonder" lighting_profile_ref="wonder">
+    <layer stem_path="demo/showcase/assets/music/stems/wonder_base.wav"
+            intensity_min="0.5" intensity_max="1.0"/>
+  </music_state>
+
+  <leitmotif id="player_heroic" source_clip="demo/showcase/assets/music/leitmotifs/heroic.wav"
+             emotional_register="heroic" permitted_contexts="combat,exploration" min_reentry_bars="4">
+    <augmentation interval_semitones="0"/>
+  </leitmotif>
+
+  <stinger id="0" source_clip="demo/showcase/assets/music/stingers/punctuate_hit.wav"
+           intent="punctuate" min_silence_bars="1"/>
+
+</music>
