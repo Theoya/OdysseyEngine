@@ -1,0 +1,28 @@
+base_male — License summary
+===========================
+
+This asset is released under **CC0 1.0 Universal (Public Domain Dedication)**.
+
+https://creativecommons.org/publicdomain/zero/1.0/
+
+Generator chain
+---------------
+- MPFB2 (MakeHuman Plugin For Blender 2) v2.0.15 build 20260421
+  License: GPL-3.0-or-later (the add-on source code)
+  Generated mesh output: CC0 (the MakeHuman base topology and all shipped
+  targets/weights are contributed under CC0 — see
+  https://static.makehumancommunity.org/mhapi/md/faq.html)
+- Blender 4.2.20 LTS (GPL-3.0-or-later — the Blender application; output
+  from Blender is unencumbered)
+
+You may use this mesh for any purpose, commercial or non-commercial, with
+or without attribution, without restriction.
+
+Generated on 2026-04-21 from:
+  macro_detail_dict = {
+    "gender": 0.0, "age": 0.30, "muscle": 0.90, "weight": 0.55,
+    "proportions": 0.50, "height": 0.55,
+    "race": {"asian": 0.20, "caucasian": 0.60, "african": 0.20}
+  }
+  rig: "game_engine" (53 bones)
+  final height: 1.912 m, feet at Z=0

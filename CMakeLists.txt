@@ -72,6 +72,29 @@ set(ENGINE_SOURCES
     ${EDITOR_SOURCES}
 )
 
+# ── ImGui Docking static library ────────────────────────────────────────────
+add_library(imgui_docking STATIC
+    third_party/imgui-docking/imgui.cpp
+    third_party/imgui-docking/imgui_draw.cpp
+    third_party/imgui-docking/imgui_tables.cpp
+    third_party/imgui-docking/imgui_widgets.cpp
+    third_party/imgui-docking/imgui_demo.cpp
+    third_party/imgui-docking/backends/imgui_impl_glfw.cpp
+    third_party/imgui-docking/backends/imgui_impl_vulkan.cpp
+)
+
+target_include_directories(imgui_docking
+  PUBLIC
+    third_party/imgui-docking
+    third_party/imgui-docking/backends
+)
+
+target_link_libraries(imgui_docking
+  PUBLIC
+    glfw
+    Vulkan::Vulkan
+)
+
 # ── Engine static library ───────────────────────────────────────────────────
 add_library(odyssey_engine STATIC ${ENGINE_SOURCES})
 
@@ -90,7 +113,7 @@ target_link_libraries(odyssey_engine
     unofficial::shaderc::shaderc
     pugixml::pugixml
     CLI11::CLI11
-    imgui::imgui
+    imgui_docking
 )
 
 # Windows: link Winsock2 for networking and MCP
@@ -194,7 +217,7 @@ add_executable(odyssey_editor ${ODYSSEY_EDITOR_MAIN})
 target_link_libraries(odyssey_editor
   PRIVATE
     odyssey_engine
-    imgui::imgui
+    imgui_docking
 )
 
 add_dependencies(odyssey_editor copy_engine_assets copy_demo_assets)

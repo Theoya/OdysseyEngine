@@ -1,5 +1,6 @@
 #include "editor/editor.h"
 
+#include "editor/project_paths.h"
 #include "editor/scene_tree_panel.h"
 #include "editor/inspector_panel.h"
 #include "editor/viewport_panel.h"
@@ -11,8 +12,11 @@
 #include "scene/scene_serializer.h"
 
 #include <imgui.h>
+#include <imgui_internal.h>
 #include <imgui_impl_glfw.h>
 #include <imgui_impl_vulkan.h>
+#define NOMINMAX
+#include <windows.h>
 
 #include <GLFW/glfw3.h>
 #include <vulkan/vulkan.h>
@@ -116,6 +120,10 @@ struct Editor::Impl {
     VkDescriptorSet       viewport_ds = VK_NULL_HANDLE; // ImGui_ImplVulkan_AddTexture result
     VkExtent2D            viewport_extent{1280, 720};
     float                 camera_orbit_time = 0.0f;
+
+    std::filesystem::path exe_dir;
+    std::string imgui_ini_path;
+    bool first_run_dock_build_pending = false;
 };
 
 // ---------------------------------------------------------------------------
@@ -415,9 +423,10 @@ static bool init_imgui(Editor::Impl& impl) {
     ImGui::CreateContext();
     ImGuiIO& io = ImGui::GetIO();
     io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
-    // Note: vcpkg's imgui does NOT ship the docking branch. Phase 1 uses
-    // the default multi-window layout; the user drags windows where they
-    // like. Phase 2 may swap to docking once we vendor imgui-docking.
+    io.ConfigFlags |= ImGuiConfigFlags_DockingEnable;
+
+    impl.imgui_ini_path = (impl.exe_dir / "imgui.ini").string();
+    io.IniFilename = impl.imgui_ini_path.c_str();
 
     ImGui::StyleColorsDark();
     ImGuiStyle& style = ImGui::GetStyle();
@@ -508,6 +517,38 @@ Result<bool> Editor::initialize(const std::filesystem::path& scene_path) {
     state_.entities   = &impl_->entities;
     state_.scene_path = scene_path;
 
+    // Resolve absolute exe directory for imgui.ini + asset path resolution.
+    {
+        wchar_t buf[MAX_PATH] = {};
+        DWORD n = GetModuleFileNameW(nullptr, buf, MAX_PATH);
+        if (n == 0 || n == MAX_PATH) {
+            return Result<bool>::err("GetModuleFileNameW failed");
+        }
+        impl_->exe_dir = std::filesystem::path(buf).parent_path();
+    }
+
+    // First-run detection: if imgui.ini is absent, queue default-layout build.
+    {
+        std::error_code ec;
+        bool ini_exists = std::filesystem::exists(impl_->exe_dir / "imgui.ini", ec);
+        impl_->first_run_dock_build_pending = !ini_exists;
+    }
+
+    // Resolve absolute project paths (new editor/project_paths module).
+    auto paths_res = editor::resolve_project_paths(impl_->exe_dir, scene_path);
+    if (paths_res.is_err()) {
+        return Result<bool>::err("resolve_project_paths: " + paths_res.error());
+    }
+    auto paths = std::move(paths_res).value();
+    std::error_code cd_ec;
+    std::filesystem::current_path(paths.exe_dir, cd_ec);
+    if (cd_ec) {
+        spdlog::warn("[editor] current_path({}) failed: {}",
+                     paths.exe_dir.string(), cd_ec.message());
+    }
+    state_.scene_path   = paths.showcase_scene;
+    state_.project_root = paths.asset_root;
+
     // Install log sink BEFORE anything else logs (subsequent spdlog calls
     // populate the editor's log panel buffer).
     if (impl_->log_panel) {
@@ -575,18 +616,6 @@ Result<bool> Editor::initialize(const std::filesystem::path& scene_path) {
             state_.viewport_texture_id = static_cast<void*>(impl_->viewport_ds);
             spdlog::info("[editor] viewport renderer registered with ImGui");
         }
-    }
-
-    // -------- Project root for the Asset Browser (Phase 4) --------
-    // Default to demo/showcase/ — the Asset Browser walks this tree. If a
-    // scene file was passed in, prefer its parent directory as the root so
-    // the browser is scoped to the project the user is editing.
-    if (!scene_path.empty()) {
-        auto parent = scene_path.parent_path();
-        state_.project_root = parent.empty() ? std::filesystem::path("demo/showcase")
-                                             : parent;
-    } else {
-        state_.project_root = std::filesystem::path("demo/showcase");
     }
 
     // -------- Scene load (non-fatal in Phase 1) --------
@@ -850,6 +879,31 @@ void Editor::draw_frame(float delta_time) {
     ImGui_ImplVulkan_NewFrame();
     ImGui_ImplGlfw_NewFrame();
     ImGui::NewFrame();
+
+    ImGuiID dockspace_id = ImGui::DockSpaceOverViewport(
+        0, ImGui::GetMainViewport(), ImGuiDockNodeFlags_PassthruCentralNode);
+
+    if (impl_->first_run_dock_build_pending) {
+        impl_->first_run_dock_build_pending = false;
+        ImGui::DockBuilderRemoveNode(dockspace_id);
+        ImGui::DockBuilderAddNode(dockspace_id, ImGuiDockNodeFlags_DockSpace);
+        ImGui::DockBuilderSetNodeSize(dockspace_id, ImGui::GetMainViewport()->Size);
+
+        ImGuiID dock_main = dockspace_id;
+        ImGuiID dock_left = ImGui::DockBuilderSplitNode(
+            dock_main, ImGuiDir_Left, 0.20f, nullptr, &dock_main);
+        ImGuiID dock_right = ImGui::DockBuilderSplitNode(
+            dock_main, ImGuiDir_Right, 0.3125f, nullptr, &dock_main);
+        ImGuiID dock_bottom = ImGui::DockBuilderSplitNode(
+            dock_main, ImGuiDir_Down, 0.25f, nullptr, &dock_main);
+
+        ImGui::DockBuilderDockWindow("Scene Tree",    dock_left);
+        ImGui::DockBuilderDockWindow("Inspector",     dock_right);
+        ImGui::DockBuilderDockWindow("Viewport",      dock_main);
+        ImGui::DockBuilderDockWindow("Asset Browser", dock_bottom);
+        ImGui::DockBuilderDockWindow("Log",           dock_bottom);
+        ImGui::DockBuilderFinish(dockspace_id);
+    }
 
     draw_menu_bar();
 

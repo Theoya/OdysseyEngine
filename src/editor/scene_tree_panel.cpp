@@ -37,6 +37,16 @@ void SceneTreePanel::draw(EditorState& state) {
 
     // --- Header ---
     if (state.entities) {
+        if (state.scene_path.empty()) {
+            ImGui::TextColored(ImVec4(0.9f, 0.3f, 0.3f, 1.0f), "No scene loaded");
+        } else {
+            ImGui::TextUnformatted(("Scene: " + state.scene_path.string()).c_str());
+            if (state.entities && state.entities->entity_count() == 0) {
+                ImGui::TextColored(ImVec4(0.9f, 0.3f, 0.3f, 1.0f),
+                                   "0 entities — is the path correct?");
+            }
+        }
+        ImGui::Separator();
         ImGui::Text("Entities: %u", state.entities->entity_count());
     } else {
         ImGui::TextDisabled("No scene loaded.");

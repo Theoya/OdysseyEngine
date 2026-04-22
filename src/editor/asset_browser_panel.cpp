@@ -208,7 +208,11 @@ void AssetBrowserPanel::draw(EditorState& state) {
     }
 
     // Header row: root path + Refresh button.
-    ImGui::TextDisabled("Root: %s", state.project_root.generic_string().c_str());
+    ImGui::TextUnformatted(("Root: " + state.project_root.string()).c_str());
+    if (entries_.empty()) {
+        ImGui::TextColored(ImVec4(0.9f, 0.3f, 0.3f, 1.0f),
+                           "0 assets — is the path correct?");
+    }
     ImGui::SameLine();
     if (ImGui::SmallButton("Refresh")) {
         refresh(state.project_root);

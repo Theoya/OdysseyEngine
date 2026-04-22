@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  base_female — MPFB2-generated shapely attractive female base mesh,
+  normalized to the OdysseyEngine 19-bone humanoid skeleton conventions
+  (height 1.91 m, feet planted at Y=0).
+
+  Source: third_party/base_humanoid/female/base_female.obj
+          produced by demo/showcase/assets/base_humanoid/scripts/generate_base_female.py
+          + scale_to_engine_skeleton.py (see that directory's BUILD_LOG.md)
+  Generator: MPFB 2.0.15 build 20260421 in Blender 4.2.20 LTS.
+  Rig (authoring): MPFB "game_engine_with_breast" standard rig (55 bones).
+
+  Geometry stats:
+    verts = 19158   polys = 18486 (100% quads, 0 tris, 0 n-gons)
+    OBJ face entries = 13378 (triangulates to ~26756 tris on engine load)
+    height = 1.912 m   feet at Z=0.0
+
+  License: CC0 / Public Domain. See LICENSE.txt in asset directory.
+
+  Renderer note: see base_male.mesh.xml for the same caveat about the
+  OdysseyEngine forward renderer not yet binding OBJ-sourced skinned meshes.
+-->
+<mesh name="base_female" version="1">
+  <source format="obj" path="third_party/base_humanoid/female/base_female.obj"/>
+  <lod>
+    <level distance="0"   triangles="26756"/>
+    <level distance="15"  triangles="8000"/>
+    <level distance="45"  triangles="2000"/>
+  </lod>
+  <collider type="capsule" radius="0.30" height="1.91"/>
+</mesh>
