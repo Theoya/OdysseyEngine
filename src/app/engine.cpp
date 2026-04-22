@@ -633,6 +633,41 @@ void Engine::process_frame(float delta_time) {
         impl_->game->on_tick(ctx);
     }
 
+    // --- Phase 9: Physics step (fixed-dt accumulator) ---
+    // Tick order per Phase 9 spec:
+    //   1. InputManager poll (completed above)
+    //   2. Script::pre_physics tick (via game->on_tick, above)
+    //   3. PhysicsWorld::step (fixed-substep loop, here)
+    //   4. Script::post_physics tick (todo: game could have a post_tick callback)
+    //   5. EntityManager::compose_world_transforms (happens in game->on_tick)
+    //   6. NadirSystem dispatch (below)
+    //   7. Renderer::render_frame (below)
+    //   8. AudioMixer::mix (todo: audio subsystem)
+    if (mode_runs_physics(mode_)) {
+        // Fixed-dt accumulator: 60 Hz = 1.0/60.0 canonical dt
+        constexpr float kFixedDt = 1.0f / 60.0f;
+        constexpr uint32_t kMaxSubsteps = 5;
+        physics_accumulator_ += delta_time;
+        uint32_t substeps = 0;
+
+        while (physics_accumulator_ >= kFixedDt && substeps < kMaxSubsteps) {
+            physics_world_.step(kFixedDt);
+            physics_accumulator_ -= kFixedDt;
+            ++substeps;
+        }
+
+        // After physics, writeback Rigidbody positions to entity local transforms
+        // (This is a placeholder — the actual implementation depends on
+        // component bindings added in Commit O)
+
+        // Compose world transforms (topological sort on parent hierarchy)
+        // The game's on_tick may have already called this; doing it again is safe
+        // (idempotent) but may be redundant.
+        if (impl_->entity_mgr.compose_world_transforms().is_err()) {
+            spdlog::error("Failed to compose world transforms after physics step");
+        }
+    }
+
     // --- Acquire image ---
     uint32_t image_index = 0;
     VkResult acquire = vkAcquireNextImageKHR(

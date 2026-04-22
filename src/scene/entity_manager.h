@@ -1,12 +1,23 @@
 #pragma once
 #include "core/types.h"
 #include "core/result.h"
+#include "physics/rigid_body.h"
+#include "physics/colliders.h"
+#include "scene/camera_component.h"
 #include <string>
 #include <vector>
 #include <unordered_map>
 #include <optional>
 
 namespace odyssey::scene {
+
+// Phase 9: Hierarchy error types
+enum class HierarchyError {
+    Cycle,              // parent cycle detected
+    SelfParent,         // entity is its own parent
+    UnknownParent,      // parent_id does not exist
+    DepthExceeded,      // nesting depth > 64
+};
 
 // Component types an entity can have
 struct EntityComponents {
@@ -29,6 +40,16 @@ struct EntityComponents {
     //   <tag name="..."/>
     // repeated children on <entity>. Inspector exposes an Add/Remove UI.
     std::vector<std::string> tags;
+
+    // Phase 9: Physics + collision components (optional, per-entity basis)
+    std::optional<physics::RigidBody> rigidbody;
+    std::optional<physics::BoxCollider> box_collider;
+    std::optional<physics::SphereCollider> sphere_collider;
+    std::optional<physics::CapsuleCollider> capsule_collider;
+    // std::optional<physics::MeshCollider> mesh_collider;  // TODO: Phase 9+
+
+    // Phase 9: Camera component (optional, marks entity as a render target)
+    std::optional<CameraComponent> camera;
 };
 
 // A single entity instance
@@ -38,6 +59,11 @@ struct Entity {
     std::string archetype;
     EntityComponents components;
     bool active = true;
+
+    // Phase 9: parent in entity hierarchy; INVALID_ENTITY means top-level.
+    // Composed world transform cached from topological sort.
+    EntityID parent_id = INVALID_ENTITY;
+    Transform world_transform;
 };
 
 // All entities of one archetype (for batch GPU dispatch)
@@ -81,6 +107,13 @@ public:
 
     // Clear everything
     void clear();
+
+    // Phase 9: Compose world transforms top-down from parent hierarchy.
+    // Computes Entity::world_transform = parent.world × local for each entity.
+    // Performs cycle detection (depth cap 64), self-parent rejection, unknown-parent
+    // validation. Returns Err with HierarchyError on any violation; returns Ok(true)
+    // on success.
+    Result<bool, HierarchyError> compose_world_transforms();
 
     // Restore entities from a snapshot (used by play-in-editor snapshot restore).
     // Clears the current entity set and replaces it with the snapshot.

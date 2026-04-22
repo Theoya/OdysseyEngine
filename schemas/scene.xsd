@@ -37,13 +37,19 @@
   <!-- Entity -->
   <xs:complexType name="EntityType">
     <xs:sequence>
-      <xs:element name="transform"    type="od:TransformType"    minOccurs="0" maxOccurs="1"/>
-      <xs:element name="stats"        type="od:StatsType"        minOccurs="0" maxOccurs="1"/>
-      <xs:element name="behavior"     type="od:BehaviorType"     minOccurs="0" maxOccurs="1"/>
-      <xs:element name="mesh"         type="od:MeshType"         minOccurs="0" maxOccurs="1"/>
-      <xs:element name="material"     type="od:MaterialType"     minOccurs="0" maxOccurs="1"/>
-      <xs:element name="script"       type="od:ScriptType"       minOccurs="0" maxOccurs="unbounded"/>
-      <xs:element name="pack"         type="od:PackType"         minOccurs="0" maxOccurs="1"/>
+      <xs:element name="transform"       type="od:TransformType"       minOccurs="0" maxOccurs="1"/>
+      <xs:element name="stats"           type="od:StatsType"           minOccurs="0" maxOccurs="1"/>
+      <xs:element name="behavior"        type="od:BehaviorType"        minOccurs="0" maxOccurs="1"/>
+      <xs:element name="mesh"            type="od:MeshType"            minOccurs="0" maxOccurs="1"/>
+      <xs:element name="material"        type="od:MaterialType"        minOccurs="0" maxOccurs="1"/>
+      <xs:element name="script"          type="od:ScriptType"          minOccurs="0" maxOccurs="unbounded"/>
+      <xs:element name="pack"            type="od:PackType"            minOccurs="0" maxOccurs="1"/>
+      <!-- Phase 9: Physics + camera components (optional, per-entity basis) -->
+      <xs:element name="rigidbody"       type="od:RigidBodyType"       minOccurs="0" maxOccurs="1"/>
+      <xs:element name="box_collider"    type="od:BoxColliderType"     minOccurs="0" maxOccurs="1"/>
+      <xs:element name="sphere_collider" type="od:SphereColliderType"  minOccurs="0" maxOccurs="1"/>
+      <xs:element name="capsule_collider" type="od:CapsuleColliderType" minOccurs="0" maxOccurs="1"/>
+      <xs:element name="camera"          type="od:CameraType"          minOccurs="0" maxOccurs="1"/>
       <!-- Free-text gameplay tags. Added in editor Phase 4 as the canonical
            demonstration of the four-step schema-add ritual: EntityComponents
            was extended, this XSD entry, the Inspector's "Tags" sub-editor,
@@ -61,6 +67,10 @@
     <xs:attribute name="id"        type="xs:string"             use="required"/>
     <xs:attribute name="archetype" type="xs:string"             use="required"/>
     <xs:attribute name="count"     type="xs:positiveInteger"    default="1"/>
+    <!-- Phase 9: Optional parent reference (entity id string). When absent, entity
+         is top-level. When present, references another entity's id attribute.
+         Cycles and missing parents are rejected at load time. -->
+    <xs:attribute name="parent"    type="xs:string"             use="optional"/>
     <xs:anyAttribute processContents="skip"/>
   </xs:complexType>
 
@@ -132,6 +142,46 @@
   <!-- Tag (Phase 4 free-text gameplay label). Required `name`, no children. -->
   <xs:complexType name="TagType">
     <xs:attribute name="name" type="xs:string" use="required"/>
+  </xs:complexType>
+
+  <!-- Phase 9: Physics + Camera Components -->
+
+  <!-- Rigidbody: dynamics enabled. -->
+  <xs:complexType name="RigidBodyType">
+    <xs:attribute name="mass"         type="xs:float" default="1.0"/>
+    <xs:attribute name="drag"         type="xs:float" default="0.01"/>
+    <xs:attribute name="angular_drag" type="xs:float" default="0.05"/>
+    <xs:attribute name="use_gravity"  type="xs:boolean" default="true"/>
+    <xs:attribute name="is_kinematic" type="xs:boolean" default="false"/>
+    <xs:attribute name="position"     type="xs:string" default="0 0 0"/>
+    <xs:attribute name="velocity"     type="xs:string" default="0 0 0"/>
+  </xs:complexType>
+
+  <!-- BoxCollider: axis-aligned box with half-extents. -->
+  <xs:complexType name="BoxColliderType">
+    <xs:attribute name="center"        type="xs:string" default="0 0 0"/>
+    <xs:attribute name="half_extents"  type="xs:string" default="0.5 0.5 0.5"/>
+  </xs:complexType>
+
+  <!-- SphereCollider: sphere. -->
+  <xs:complexType name="SphereColliderType">
+    <xs:attribute name="center" type="xs:string" default="0 0 0"/>
+    <xs:attribute name="radius" type="xs:float"  default="0.5"/>
+  </xs:complexType>
+
+  <!-- CapsuleCollider: cylinder with rounded ends. -->
+  <xs:complexType name="CapsuleColliderType">
+    <xs:attribute name="center" type="xs:string" default="0 0 0"/>
+    <xs:attribute name="radius" type="xs:float"  default="0.4"/>
+    <xs:attribute name="height" type="xs:float"  default="1.8"/>
+  </xs:complexType>
+
+  <!-- Camera: render target. -->
+  <xs:complexType name="CameraType">
+    <xs:attribute name="fov"     type="xs:float" default="70.0"/>
+    <xs:attribute name="near"    type="xs:float" default="0.1"/>
+    <xs:attribute name="far"     type="xs:float" default="1000.0"/>
+    <xs:attribute name="is_main" type="xs:boolean" default="false"/>
   </xs:complexType>
 
   <!-- Spawn region -->

@@ -66,21 +66,32 @@ void main() {
     //     fill light factor = 0.15 (secondary fill from below-left)
     // ---------------------------------------------------------------------------
 
-    vec3 light_dir = normalize(vec3(0.4, 0.8, 0.3));
+    // Phase 9 lighting (fallback when LightingProfile UBO not yet bound):
+    // Directional light: debug fallback sun direction (future: from LightingProfile)
+    vec3 light_dir = normalize(vec3(-1.0, -2.0, -1.0));
     vec3 normal    = normalize(fragNormal);
 
+    // Ambient term: neutral grey 0.15 (ensures no fully-black shadows;
+    // Phase 9 condition M3: future to be sourced from LightingProfile ambient color+intensity)
     float ambient = 0.15;
+
+    // Diffuse (Lambertian): L_d = k_d * max(dot(N, L), 0)
+    // k_d = 0.75 (dominant term, gives weighted appearance)
     float diffuse = max(dot(normal, light_dir), 0.0);
 
-    // Blinn-Phong half-vector (view approximated as (0,0,1) in world-ish space).
+    // Blinn-Phong specular: L_s = k_s * max(dot(N, H), 0)^shininess
+    // H = normalize(L + V); V approximated as (0,0,1) in world-ish space.
+    // k_s = 0.20, shininess = 32 (subtle highlights)
     vec3 view_dir  = vec3(0.0, 0.0, 1.0);
     vec3 half_vec  = normalize(light_dir + view_dir);
     float specular = pow(max(dot(normal, half_vec), 0.0), 32.0) * 0.20;
 
-    // Secondary fill light from below-left (softens harsh shadows).
+    // Secondary fill light from below-left: softens harsh shadows.
+    // L_fill = 0.15 * max(dot(N, fill_dir), 0)
     vec3  fill_dir = normalize(vec3(-0.3, -0.2, 0.6));
     float fill     = max(dot(normal, fill_dir), 0.0) * 0.15;
 
+    // Total irradiance: L = ambient + k_d * diffuse + specular + fill
     float lighting = clamp(ambient + diffuse * 0.75 + specular + fill, 0.0, 1.0);
 
     // ---------------------------------------------------------------------------

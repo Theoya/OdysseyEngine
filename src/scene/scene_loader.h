@@ -2,10 +2,15 @@
 #include "core/types.h"
 #include "core/result.h"
 #include "scene/entity_manager.h"
+#include "physics/rigid_body.h"
+#include "physics/colliders.h"
+#include "scene/camera_component.h"
+#include <pugixml.hpp>
 #include <string>
 #include <filesystem>
 #include <utility>
 #include <vector>
+#include <optional>
 
 namespace odyssey::scene {
 
@@ -25,6 +30,9 @@ struct SceneData {
         uint32_t count = 1;  // for batch spawning
         Transform transform;
         EntityStats stats;
+
+        // Phase 9: parent entity ID (as string in XML, resolved to EntityID at populate time)
+        std::string parent_id;
 
         // Proximity-voice audibility radius in meters, parsed from the
         // `voice_range` attribute on <stats>. Default 25.0f = d_max from the
@@ -76,6 +84,13 @@ struct SceneData {
         // full four-step schema-add ritual (EntityComponents ← XSD ← Inspector
         // ← serializer) in the editor pipeline.
         std::vector<std::string> tags;
+
+        // Phase 9: Optional physics + camera components (parsed from XML elements)
+        std::optional<physics::RigidBody> rigidbody;
+        std::optional<physics::BoxCollider> box_collider;
+        std::optional<physics::SphereCollider> sphere_collider;
+        std::optional<physics::CapsuleCollider> capsule_collider;
+        std::optional<CameraComponent> camera;
     };
 
     std::vector<EntityDesc> entities;
@@ -116,5 +131,15 @@ void populate_entities(EntityManager& manager, const SceneData& scene);
 
 // List all .scene.xml files in a directory
 std::vector<std::filesystem::path> find_scene_files(const std::filesystem::path& dir);
+
+// --- Phase 9: Component parsers (pure functions) ---
+// Each returns Result<T, std::string>; success for valid components,
+// Err for malformed data (negative radius, missing required attr, invalid vec3, etc.)
+
+Result<physics::RigidBody> parse_rigidbody(const pugi::xml_node& node);
+Result<physics::BoxCollider> parse_box_collider(const pugi::xml_node& node);
+Result<physics::SphereCollider> parse_sphere_collider(const pugi::xml_node& node);
+Result<physics::CapsuleCollider> parse_capsule_collider(const pugi::xml_node& node);
+Result<CameraComponent> parse_camera(const pugi::xml_node& node);
 
 } // namespace odyssey::scene

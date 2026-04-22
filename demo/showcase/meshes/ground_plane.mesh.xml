@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Phase 9: Ground plane mesh for walker scene.
+     Visual: flat plane, 50x50 units (scaled 50x0.1x50 on entity).
+     Mesh type 2 (ground plane primitive).
+-->
+<mesh name="ground_plane" version="1" primitive="plane">
+  <primitive_config>
+    <color r="0.5" g="0.5" b="0.5" a="1.0"/>
+  </primitive_config>
+</mesh>
