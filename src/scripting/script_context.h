@@ -9,12 +9,19 @@
 
 namespace odyssey::scripting {
 
+// Phase 9: Script execution phases (gates Physics::world_mut access)
+enum class ScriptPhase {
+    PrePhysics,   // Can write to Rigidbody; script outputs are authoritative
+    PostPhysics,  // Read-only on physics state; bodies already stepped
+};
+
 class ScriptContext {
 public:
     EntityID player_id = INVALID_ENTITY;
     float delta_time = 0.0f;
     float total_time = 0.0f;
     uint32_t frame_number = 0;
+    ScriptPhase current_phase = ScriptPhase::PrePhysics;  // Phase 9
 
     // Key-value store for game state (quest states, flags, counters)
     template<typename T>

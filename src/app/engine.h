@@ -4,6 +4,7 @@
 #include "core/result.h"
 #include "core/mode.h"
 #include "app/game.h"
+#include "physics/physics_world.h"
 
 #include <cstdint>
 #include <filesystem>
@@ -88,6 +89,12 @@ public:
     bool tick_would_step_physics()    const { return mode_runs_physics(mode_); }
     bool tick_would_run_camera()      const { return mode_runs_camera(mode_); }
 
+    // Phase 9: Physics world accessors
+    // const getter for all code
+    const physics::PhysicsWorld& physics_world() const { return physics_world_; }
+    // mutable getter gated to pre_physics script phase only (documented contract)
+    physics::PhysicsWorld& physics_world_mut() { return physics_world_; }
+
 private:
     // Per-frame work
     void process_frame(float delta_time);
@@ -121,6 +128,10 @@ private:
     uint32_t current_frame_ = 0;
     float total_time_   = 0.0f;
     double last_time_   = 0.0;
+
+    // Phase 9: Physics world with fixed-dt accumulator
+    physics::PhysicsWorld physics_world_;
+    double physics_accumulator_ = 0.0;
 
     // Vulkan + Nadir state kept behind a pimpl wall so this header
     // does not pull in Vulkan or Nadir headers.
