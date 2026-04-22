@@ -16,6 +16,7 @@
 #include "editor/build_settings_panel.h"
 #include "editor/preferences_panel.h"
 #include "editor/status_bar.h"
+#include "editor/command_palette.h"
 
 #include "scene/scene_loader.h"
 #include "scene/scene_serializer.h"
@@ -146,6 +147,21 @@ struct Editor::Impl {
 
     // Batch F: Scene dirty flag tracking (for undo capture)
     bool scene_dirty_prev = false;
+
+    // Batch H: Splash screen timing (auto-dismiss after 1.5s)
+    float splash_time = 0.0f;
+    bool show_splash = true;
+
+    // Batch H: First-run welcome wizard
+    bool first_run_wizard_pending = false;
+    int wizard_page = 0;  // 0=welcome, 1=quick-tour, 2=try-it
+
+    // Batch H: About dialog flag
+    bool show_about_dialog = false;
+
+    // Batch H: Command palette state
+    bool show_command_palette = false;
+    std::string command_palette_query;
 };
 
 // ---------------------------------------------------------------------------
@@ -673,6 +689,20 @@ Result<bool> Editor::initialize(const std::filesystem::path& scene_path) {
         state_.status_line = "No scene specified.";
     }
 
+    // Batch H: Check for first-run wizard and splash
+    {
+        impl_->show_splash = true;
+        impl_->splash_time = 0.0f;
+
+        // First-run detection: if editor_prefs.xml does NOT exist, show wizard
+        std::filesystem::path prefs_file = impl_->exe_dir / "editor_prefs.xml";
+        if (!std::filesystem::exists(prefs_file)) {
+            impl_->first_run_wizard_pending = true;
+            impl_->wizard_page = 0;
+            spdlog::info("[editor] first-run wizard queued");
+        }
+    }
+
     spdlog::info("[editor] initialized");
     return Result<bool>::ok(true);
 }
@@ -1128,11 +1158,26 @@ void Editor::draw_menu_bar() {
     }
 
     if (ImGui::BeginMenu("Help")) {
-        ImGui::MenuItem("OdysseyEditor — Batch B", nullptr, false, false);
-        ImGui::MenuItem("File menu + Hierarchy UX — scenes, recent, dirty, context menu",
-                        nullptr, false, false);
-        ImGui::MenuItem("Ctrl+N/O/S saves & loads scenes.",
-                        nullptr, false, false);
+        // Batch H: About dialog
+        if (ImGui::MenuItem("About")) {
+            impl_->show_about_dialog = true;
+        }
+
+        ImGui::Separator();
+
+        // Batch H: Help documentation (stubs for now — open in default app in Batch I)
+        if (ImGui::MenuItem("Architecture")) {
+            spdlog::info("[editor] Help: Open Architecture doc (deferred to Batch I)");
+        }
+
+        if (ImGui::MenuItem("Nadir Guide")) {
+            spdlog::info("[editor] Help: Open Nadir Guide (deferred to Batch I)");
+        }
+
+        if (ImGui::MenuItem("CLI Reference")) {
+            spdlog::info("[editor] Help: Open CLI Reference (deferred to Batch I)");
+        }
+
         ImGui::EndMenu();
     }
 
@@ -1412,6 +1457,148 @@ void Editor::draw_frame(float delta_time) {
 
     // Batch B: Draw unsaved-changes popup
     draw_unsaved_changes_popup(state_, "action");
+
+    // Batch H: Ctrl+P command palette
+    if (ImGui::IsKeyPressed(ImGuiKey_P, false) && ImGui::GetIO().KeyCtrl) {
+        impl_->show_command_palette = true;
+        impl_->command_palette_query = "";
+    }
+
+    if (impl_->show_command_palette) {
+        ImVec2 center = ImGui::GetMainViewport()->GetCenter();
+        ImGui::SetNextWindowPos(center, ImGuiCond_Appearing, ImVec2(0.5f, 0.3f));
+        ImGui::SetNextWindowSize(ImVec2(600, 400), ImGuiCond_FirstUseEver);
+
+        if (ImGui::BeginPopupModal("##command_palette", &impl_->show_command_palette,
+                                   ImGuiWindowFlags_NoTitleBar)) {
+            ImGui::SetNextItemWidth(-1);
+            ImGui::InputText("##palette_input", impl_->command_palette_query.data(),
+                           impl_->command_palette_query.capacity() + 1);
+
+            ImGui::Separator();
+
+            // Build command registry and filter
+            CommandRegistry reg;
+            register_builtin_commands(reg);
+            auto filtered = filter_commands(reg.items, impl_->command_palette_query);
+
+            // Draw filtered results
+            if (ImGui::BeginListBox("##palette_list", ImVec2(-1, 300))) {
+                for (size_t i = 0; i < filtered.size(); ++i) {
+                    const auto* cmd = filtered[i];
+                    bool selected = (i == 0);  // Top result is default selection
+                    if (ImGui::Selectable(cmd->label.c_str(), selected)) {
+                        if (cmd->invoke) cmd->invoke(state_);
+                        impl_->show_command_palette = false;
+                    }
+                    if (ImGui::IsKeyPressed(ImGuiKey_Enter, false) && selected) {
+                        if (cmd->invoke) cmd->invoke(state_);
+                        impl_->show_command_palette = false;
+                    }
+                }
+                ImGui::EndListBox();
+            }
+
+            ImGui::EndPopup();
+        }
+
+        if (ImGui::IsKeyPressed(ImGuiKey_Escape, false)) {
+            impl_->show_command_palette = false;
+        }
+    }
+
+    // Batch H: Splash screen (auto-dismiss after 1.5s)
+    if (impl_->show_splash) {
+        impl_->splash_time += delta_time;
+        if (impl_->splash_time > 1.5f || ImGui::IsKeyPressed(ImGuiKey_Escape, false) ||
+            ImGui::IsMouseClicked(ImGuiMouseButton_Left)) {
+            impl_->show_splash = false;
+        } else {
+            ImVec2 center = ImGui::GetMainViewport()->GetCenter();
+            ImGui::SetNextWindowPos(center, ImGuiCond_Appearing, ImVec2(0.5f, 0.5f));
+            ImGui::BeginPopupModal("##splash", nullptr, ImGuiWindowFlags_NoTitleBar |
+                                                        ImGuiWindowFlags_NoMove |
+                                                        ImGuiWindowFlags_AlwaysAutoResize);
+            ImGui::Text("OdysseyEngine Editor");
+            ImGui::Text("Build: %s", __DATE__);
+            ImGui::EndPopup();
+        }
+    }
+
+    // Batch H: About dialog
+    if (impl_->show_about_dialog) {
+        ImVec2 center = ImGui::GetMainViewport()->GetCenter();
+        ImGui::SetNextWindowPos(center, ImGuiCond_Appearing, ImVec2(0.5f, 0.5f));
+        if (ImGui::BeginPopupModal("About OdysseyEngine", &impl_->show_about_dialog,
+                                   ImGuiWindowFlags_AlwaysAutoResize)) {
+            ImGui::TextWrapped("OdysseyEngine Editor\n\n"
+                             "Version: dev (Phase 8)\n"
+                             "Build Date: %s\n"
+                             "Git Hash: (unavailable in Batch H)\n\n"
+                             "Licensed under MIT",
+                             __DATE__);
+            ImGui::Spacing();
+            if (ImGui::Button("OK", ImVec2(120, 0))) {
+                impl_->show_about_dialog = false;
+                ImGui::CloseCurrentPopup();
+            }
+            ImGui::EndPopup();
+        }
+    }
+
+    // Batch H: First-run welcome wizard
+    if (impl_->first_run_wizard_pending) {
+        ImVec2 center = ImGui::GetMainViewport()->GetCenter();
+        ImGui::SetNextWindowPos(center, ImGuiCond_Appearing, ImVec2(0.5f, 0.5f));
+        ImGui::SetNextWindowSize(ImVec2(500, 350), ImGuiCond_FirstUseEver);
+
+        if (ImGui::BeginPopupModal("Welcome to OdysseyEngine", nullptr,
+                                   ImGuiWindowFlags_AlwaysAutoResize)) {
+            if (impl_->wizard_page == 0) {
+                ImGui::TextWrapped("Welcome to OdysseyEngine Editor!\n\n"
+                                 "This is a powerful tool for crafting 3D game worlds\n"
+                                 "with GPU-driven AI behavior authoring.\n\n"
+                                 "Let's get you started.");
+                ImGui::Spacing();
+                ImGui::Spacing();
+                if (ImGui::Button("Next >>", ImVec2(120, 0))) {
+                    impl_->wizard_page = 1;
+                }
+            } else if (impl_->wizard_page == 1) {
+                ImGui::TextWrapped("Editor Panels:\n\n"
+                                 "• Hierarchy: Left — organize your scene entities\n"
+                                 "• Inspector: Right — edit entity properties\n"
+                                 "• Viewport: Center — 3D view of your scene\n"
+                                 "• Asset Browser: Bottom — browse meshes, materials, etc.\n"
+                                 "• Log: Bottom — engine messages & debug output");
+                ImGui::Spacing();
+                if (ImGui::Button("<< Back", ImVec2(100, 0))) {
+                    impl_->wizard_page = 0;
+                }
+                ImGui::SameLine();
+                if (ImGui::Button("Next >>", ImVec2(100, 0))) {
+                    impl_->wizard_page = 2;
+                }
+            } else if (impl_->wizard_page == 2) {
+                ImGui::TextWrapped("Quick Tips:\n\n"
+                                 "• Press F to frame the selected entity\n"
+                                 "• W/E/R to switch Move/Rotate/Scale tools\n"
+                                 "• Ctrl+P for the command palette\n"
+                                 "• F11 to toggle fullscreen\n\n"
+                                 "Ready to create?");
+                ImGui::Spacing();
+                if (ImGui::Button("<< Back", ImVec2(100, 0))) {
+                    impl_->wizard_page = 1;
+                }
+                ImGui::SameLine();
+                if (ImGui::Button("Let's Go!", ImVec2(100, 0))) {
+                    impl_->first_run_wizard_pending = false;
+                    ImGui::CloseCurrentPopup();
+                }
+            }
+            ImGui::EndPopup();
+        }
+    }
 
     ImGui::Render();
     ImDrawData* draw_data = ImGui::GetDrawData();

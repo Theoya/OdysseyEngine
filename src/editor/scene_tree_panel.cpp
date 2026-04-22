@@ -229,6 +229,33 @@ void SceneTreePanel::draw(EditorState& state) {
                         // Disabled until clipboard is implemented
                     }
 
+                    ImGui::Separator();
+
+                    // Batch H: Prefab operations
+                    if (ImGui::MenuItem("Create Prefab")) {
+                        spdlog::info("[editor] Create Prefab stub for entity {}", eid);
+                        // TODO: wire to prefab_ops::create_prefab_from_entity in Batch K
+                    }
+
+                    if (ImGui::MenuItem("Edit Prefab", nullptr, false)) {
+                        ImGui::OpenPopup("Prefab Edit Stub");
+                    }
+
+                    if (ImGui::MenuItem("Apply Overrides", nullptr, false)) {
+                        spdlog::info("[editor] Apply Prefab Overrides stub for entity {}", eid);
+                        // TODO: wire to prefab_ops::apply_prefab_overrides in Batch K
+                    }
+
+                    if (ImGui::MenuItem("Revert Overrides", nullptr, false)) {
+                        spdlog::info("[editor] Revert Prefab Overrides stub for entity {}", eid);
+                        // TODO: wire to prefab_ops::revert_prefab_overrides in Batch K
+                    }
+
+                    if (ImGui::MenuItem("Unpack Prefab")) {
+                        spdlog::info("[editor] Unpack Prefab for entity {}", eid);
+                        // TODO: wire to prefab_ops::unpack_prefab in Batch K
+                    }
+
                     ImGui::EndPopup();
                 }
 
@@ -275,6 +302,24 @@ void SceneTreePanel::draw(EditorState& state) {
             }
             ImGui::TreePop();
         }
+    }
+
+    // Batch H: Prefab edit stub popup
+    ImVec2 center = ImGui::GetMainViewport()->GetCenter();
+    ImGui::SetNextWindowPos(center, ImGuiCond_Appearing, ImVec2(0.5f, 0.5f));
+    if (ImGui::BeginPopupModal("Prefab Edit Stub", nullptr,
+                              ImGuiWindowFlags_AlwaysAutoResize)) {
+        ImGui::TextWrapped(
+            "Prefab isolation mode will be available in Phase 9.\n\n"
+            "For now, you can:\n"
+            "  • Create Prefab: save entity to .prefab.xml\n"
+            "  • Unpack Prefab: replace instance with constituents\n\n"
+            "Full editing deferred to later phases.");
+        ImGui::Spacing();
+        if (ImGui::Button("OK", ImVec2(120, 0))) {
+            ImGui::CloseCurrentPopup();
+        }
+        ImGui::EndPopup();
     }
 
     ImGui::End();
