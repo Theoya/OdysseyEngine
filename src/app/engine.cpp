@@ -372,7 +372,7 @@ Result<bool> Engine::init_vulkan(const EngineConfig& config) {
     auto dev_cfg = vulkan::select_physical_device(
         impl_->instance, impl_->surface, config.gpu_index);
     auto dev_res = vulkan::create_device(dev_cfg, impl_->instance);
-    if (dev_res.is_err()) return Result<bool>::err(dev_res.error());
+    if (dev_res.is_err()) return Result<bool>::err(vulkan::device_create_err_to_string(dev_res.error()));
     impl_->device_ctx = dev_res.value();
 
     // 4. Swapchain — compute config from surface capabilities
