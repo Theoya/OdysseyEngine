@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Phase 9: walker_testbed lighting profile.
+     Contemplative mood for the first-footstep moment.
+     5600K sun (warm, reverent) + 5000K ambient (cool, uneasy).
+     Low contrast, vignette 0.15, bloom 1.1@0.3 for atmospheric depth.
+-->
+<lighting_profile name="walker_testbed" version="1">
+  <!-- Directional light (sun): 5600K warm white, slightly desaturated for mood -->
+  <sun>
+    <direction x="-1" y="-2" z="-1"/>
+    <kelvin value="5600"/>
+    <intensity value="1.0"/>
+  </sun>
+
+  <!-- Ambient light: 5000K cool white to create slight tension -->
+  <ambient>
+    <kelvin value="5000"/>
+    <intensity value="0.25"/>
+  </ambient>
+
+  <!-- Post-processing: low-contrast, vignette, subtle bloom -->
+  <post_fx>
+    <contrast value="0.85"/>
+    <vignette strength="0.15"/>
+    <bloom enabled="true" threshold="0.3" intensity="1.1"/>
+  </post_fx>
+</lighting_profile>

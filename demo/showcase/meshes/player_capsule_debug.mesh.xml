@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Phase 9: Debug capsule mesh for player entity.
+     Visual: cylinder with rounded ends, r=0.4 h=1.8, pivot at feet.
+     Used during development to verify collision shape visually.
+     Mesh type 3 (cylinder) sized to match CapsuleCollider (r=0.4, h=1.8).
+-->
+<mesh name="player_capsule_debug" version="1" primitive="cylinder">
+  <primitive_config>
+    <radius value="0.4"/>
+    <height value="1.8"/>
+    <color r="0.7" g="0.7" b="1.0" a="0.5"/>
+    <pivot>x=0 y=0.9 z=0</pivot>
+  </primitive_config>
+</mesh>

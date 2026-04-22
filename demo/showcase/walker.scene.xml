@@ -1,0 +1,42 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- VIBE: Fantasy-Etherealism empty arena — reverent, slightly uneasy,
+     the world does not explain itself. First-footstep testbed (Phase 9).
+     Lighting profile: walker_testbed (5600K sun + 5000K ambient, low contrast,
+     vignette 0.15, bloom 1.1@0.3) to set the contemplative mood.
+-->
+<scene name="walker" version="1" lighting_profile="walker_testbed" music_state_ref="contemplative">
+  <!-- Ground plane — infinite floor for physics collision -->
+  <entity id="ground" archetype="static">
+    <transform position="0 0 0" scale="50 0.1 50"/>
+    <stats health="9999" max_health="9999"/>
+    <mesh src="demo/showcase/meshes/ground_plane.mesh.xml"/>
+    <box_collider half_extents="25 0.05 25"/>
+  </entity>
+
+  <!-- Player entity — rigidbody at feet, camera as child at eye height.
+       Physics: 75kg humanoid, gravity enabled, capsule collision r=0.4 h=1.8.
+       Script: FirstPersonController for WASD + mouselook input.
+  -->
+  <entity id="player" archetype="player">
+    <transform position="0 2 0"/>
+    <stats health="100" max_health="100" speed="4.0"/>
+    <mesh src="demo/showcase/meshes/player_capsule_debug.mesh.xml"/>
+    <!-- Physics: standard humanoid mass + gravity -->
+    <rigidbody mass="75" drag="0.1" use_gravity="true" is_kinematic="false"/>
+    <!-- Collision: capsule r=0.4 h=1.8 with feet at (0,0,0) relative to entity -->
+    <capsule_collider radius="0.4" height="1.8" center="0 0.9 0"/>
+    <!-- Script: FirstPersonController processes input and physics -->
+    <script class="FirstPersonController"/>
+  </entity>
+
+  <!-- Player camera — child of player entity, positioned at eye level.
+       Parent transform composes to world = player.world × local.
+       Eye height 1.7m relative to feet (player height 1.8, so ~0.1 from capsule top).
+       Camera is client-local (never replicated, kReplicated=false in Phase 9).
+  -->
+  <entity id="player_camera" parent="player" archetype="camera">
+    <transform position="0 0.85 0"/>
+    <camera fov="70" near="0.1" far="1000" is_main="true"/>
+  </entity>
+
+</scene>
