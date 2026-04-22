@@ -240,6 +240,51 @@ CommandResult cmd_scene_validate(const std::string& path) {
     return result;
 }
 
+// ---------------------------------------------------------------------------
+// cmd_assets_bindless_stats
+// ---------------------------------------------------------------------------
+
+CommandResult cmd_assets_bindless_stats(uint32_t used, uint32_t total) {
+    // Pure function: stats are passed in from the live registry rather than
+    // queried directly, keeping this command testable without a GPU device.
+    CommandResult result;
+    std::ostringstream oss;
+
+    uint32_t free_slots = total > used ? (total - used) : 0u;
+    float occupancy_pct  = total > 0 ? (static_cast<float>(used) / static_cast<float>(total)) * 100.0f : 0.0f;
+    float fragment_pct   = 0.0f; // Phase 6: free list is LIFO; fragmentation = 0 by construction
+
+    oss << "[assets] Bindless texture registry stats\n";
+    oss << "  Capacity      : " << total << " slots\n";
+    oss << "  Used          : " << used  << " slots";
+    if (total > 0) {
+        oss << " (" << static_cast<int>(occupancy_pct) << "%)";
+    }
+    oss << "\n";
+    oss << "  Free          : " << free_slots << " slots\n";
+    oss << "  Fragmentation : " << static_cast<int>(fragment_pct) << "% (LIFO free-list, always 0)\n";
+    oss << "  Slot 0        : [reserved — magenta sentinel]\n";
+    oss << "  Note: run with --verbose for per-slot resident list (Phase 7)\n";
+
+    result.output = oss.str();
+    return result;
+}
+
+// ---------------------------------------------------------------------------
+// cmd_assets_texture_count
+// ---------------------------------------------------------------------------
+
+CommandResult cmd_assets_texture_count(uint32_t used) {
+    // Pure function: used count passed in from live registry.
+    // Slot 0 (sentinel) is included in `used` — subtract 1 for authoring budget.
+    CommandResult result;
+    std::ostringstream oss;
+    uint32_t authoring_count = used > 0 ? used - 1u : 0u; // exclude sentinel
+    oss << authoring_count << "\n";
+    result.output = oss.str();
+    return result;
+}
+
 } // namespace commands
 
 // ---------------------------------------------------------------------------

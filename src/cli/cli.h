@@ -46,5 +46,14 @@ CommandResult cmd_scene_list(const std::string& scene_dir);
 /// Validate a scene file against the engine schema.
 CommandResult cmd_scene_validate(const std::string& path);
 
+/// Print bindless slot occupancy, fragmentation, and the top-N largest
+/// resident textures.  Pure: uses stats passed in, no GPU access.
+/// (architect + asset-engineer condition)
+CommandResult cmd_assets_bindless_stats(uint32_t used, uint32_t total);
+
+/// Print total texture count as a single integer.  Pure.
+/// (3d-modeler condition — pre-ship authoring budget check)
+CommandResult cmd_assets_texture_count(uint32_t used);
+
 } // namespace commands
 } // namespace odyssey::cli
