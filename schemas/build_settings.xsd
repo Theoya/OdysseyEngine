@@ -1,0 +1,58 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema">
+
+  <!-- Build settings schema for editor build configuration.
+       Defines the target game, build config, output directory, and list
+       of scenes to include in the binary distribution.
+  -->
+
+  <xs:element name="build_settings">
+    <xs:complexType>
+      <xs:sequence>
+        <xs:element name="scenes" minOccurs="1">
+          <xs:complexType>
+            <xs:sequence>
+              <xs:element name="scene" maxOccurs="unbounded">
+                <xs:complexType>
+                  <xs:attribute name="path" type="xs:string" use="required"/>
+                </xs:complexType>
+              </xs:element>
+            </xs:sequence>
+          </xs:complexType>
+        </xs:element>
+        <xs:element name="defines" minOccurs="0">
+          <xs:complexType>
+            <xs:sequence>
+              <xs:element name="define" minOccurs="0" maxOccurs="unbounded">
+                <xs:complexType>
+                  <xs:attribute name="name" type="xs:string" use="required"/>
+                  <xs:attribute name="value" type="xs:string" use="required"/>
+                </xs:complexType>
+              </xs:element>
+            </xs:sequence>
+          </xs:complexType>
+        </xs:element>
+      </xs:sequence>
+      <xs:attribute name="target" use="required">
+        <xs:simpleType>
+          <xs:restriction base="xs:string">
+            <xs:enumeration value="odyssey_shooter"/>
+            <xs:enumeration value="odyssey_fps"/>
+            <xs:enumeration value="odyssey_editor"/>
+          </xs:restriction>
+        </xs:simpleType>
+      </xs:attribute>
+      <xs:attribute name="config" default="Release">
+        <xs:simpleType>
+          <xs:restriction base="xs:string">
+            <xs:enumeration value="Debug"/>
+            <xs:enumeration value="Release"/>
+            <xs:enumeration value="RelWithDebInfo"/>
+          </xs:restriction>
+        </xs:simpleType>
+      </xs:attribute>
+      <xs:attribute name="output_dir" type="xs:string" default="../dist"/>
+    </xs:complexType>
+  </xs:element>
+
+</xs:schema>

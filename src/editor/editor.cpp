@@ -13,6 +13,9 @@
 #include "editor/undo_stack.h"
 #include "editor/layout_presets.h"
 #include "editor/entity_clipboard.h"
+#include "editor/build_settings_panel.h"
+#include "editor/preferences_panel.h"
+#include "editor/status_bar.h"
 
 #include "scene/scene_loader.h"
 #include "scene/scene_serializer.h"
@@ -683,6 +686,8 @@ void Editor::build_panels() {
     panels_.push_back(std::make_unique<ViewportPanel>());
     panels_.push_back(std::make_unique<AssetBrowserPanel>());
     panels_.push_back(std::move(log_panel));
+    panels_.push_back(std::make_unique<BuildSettingsPanel>());
+    panels_.push_back(std::make_unique<PreferencesPanel>(impl_->exe_dir));
 }
 
 // Phase 4: consume EditorState save/swap requests between frames so we never
@@ -1070,6 +1075,20 @@ void Editor::draw_menu_bar() {
             spdlog::info("[editor] deselect all");
         }
 
+        ImGui::Separator();
+
+        // Batch G: Preferences (opens PreferencesPanel)
+        if (ImGui::MenuItem("Preferences", nullptr)) {
+            // PreferencesPanel is already created in build_panels().
+            // Just make it visible.
+            for (auto& p : panels_) {
+                if (p->name() == "Preferences") {
+                    p->set_visible(true);
+                    break;
+                }
+            }
+        }
+
         ImGui::EndMenu();
     }
 
@@ -1243,11 +1262,17 @@ void Editor::draw_mode_toolbar() {
 }
 
 void Editor::draw_status_bar() {
-    // Phase 1: just append status to the log panel's last line via spdlog —
-    // skip a dedicated status window to keep the screen uncluttered.
+    // Compute FPS from last frame's delta_time using EMA with α=0.1.
+    float current_fps = (last_delta_time_ > 0) ? (1.0f / last_delta_time_) : 60.0f;
+    fps_ema_ = compute_fps_ema(fps_ema_, current_fps, 0.1f);
+
+    odyssey::editor::draw_status_bar(state_, fps_ema_, last_delta_time_ * 1000.0f);
 }
 
 void Editor::draw_frame(float delta_time) {
+    // Store delta_time for status bar FPS calculation.
+    last_delta_time_ = delta_time;
+
     // ---- Apply any viewport-resize request made last frame (outside any
     //      command buffer recording) before touching the fence.
     if (impl_->has_viewport_renderer &&
@@ -1381,6 +1406,9 @@ void Editor::draw_frame(float delta_time) {
     for (auto& p : panels_) {
         p->draw(state_);
     }
+
+    // Batch G: Draw status bar.
+    draw_status_bar();
 
     // Batch B: Draw unsaved-changes popup
     draw_unsaved_changes_popup(state_, "action");

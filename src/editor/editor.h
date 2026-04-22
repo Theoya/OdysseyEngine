@@ -183,6 +183,10 @@ private:
     std::vector<std::unique_ptr<Panel>> panels_;
     EditorState state_;
 
+    // Batch G: Track frame times for FPS calculation.
+    float fps_ema_ = 60.0f;
+    float last_delta_time_ = 1.0f / 60.0f;
+
     void build_panels();
     void draw_frame(float delta_time);
     void draw_menu_bar();
