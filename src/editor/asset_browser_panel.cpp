@@ -127,6 +127,17 @@ void sort_assets_canonical(std::vector<AssetEntry>& entries) {
         });
 }
 
+std::vector<AssetEntry> filter_by_type(
+    const std::vector<AssetEntry>& entries, AssetType type) {
+    std::vector<AssetEntry> out;
+    for (const auto& entry : entries) {
+        if (entry.type == type) {
+            out.push_back(entry);
+        }
+    }
+    return out;
+}
+
 std::vector<AssetEntry> enumerate_project(const std::filesystem::path& root) {
     std::vector<AssetEntry> out;
     std::error_code ec;

@@ -91,6 +91,11 @@ std::vector<AssetEntry> enumerate_project(const std::filesystem::path& root);
 // tests to pin the ordering contract.
 void sort_assets_canonical(std::vector<AssetEntry>& entries);
 
+// Filter a vector of assets, returning only those matching a specific type.
+// Pure: no side effects. Returns a new vector; input is unchanged.
+std::vector<AssetEntry> filter_by_type(
+    const std::vector<AssetEntry>& entries, AssetType type);
+
 // ---------------------------------------------------------------------------
 // Panel
 // ---------------------------------------------------------------------------
