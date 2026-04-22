@@ -48,6 +48,7 @@ file(GLOB_RECURSE NET_SOURCES       CONFIGURE_DEPENDS "src/net/*.cpp"       "src
 file(GLOB VOICE_FRAME_SOURCES CONFIGURE_DEPENDS
     "src/audio/voice/voice_frame.cpp"
     "src/audio/voice/voice_frame.h")
+file(GLOB_RECURSE MUSIC_SOURCES     CONFIGURE_DEPENDS "src/audio/music/*.cpp"     "src/audio/music/*.h")
 file(GLOB_RECURSE MCP_SOURCES       CONFIGURE_DEPENDS "src/mcp/*.cpp"       "src/mcp/*.h")
 file(GLOB_RECURSE DEBUG_SOURCES     CONFIGURE_DEPENDS "src/debug/*.cpp"     "src/debug/*.h")
 file(GLOB_RECURSE ANIM_SOURCES      CONFIGURE_DEPENDS "src/animation/*.cpp" "src/animation/*.h")
@@ -65,6 +66,7 @@ set(ENGINE_SOURCES
     ${APP_SOURCES}
     ${NET_SOURCES}
     ${VOICE_FRAME_SOURCES}
+    ${MUSIC_SOURCES}
     ${MCP_SOURCES}
     ${DEBUG_SOURCES}
     ${ANIM_SOURCES}
