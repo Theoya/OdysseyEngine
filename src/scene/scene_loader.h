@@ -26,6 +26,9 @@ struct SceneData {
         Transform transform;
         EntityStats stats;
 
+        // Phase 9: parent entity ID (as string in XML, resolved to EntityID at populate time)
+        std::string parent_id;
+
         // Proximity-voice audibility radius in meters, parsed from the
         // `voice_range` attribute on <stats>. Default 25.0f = d_max from the
         // inverse-amplitude attenuation curve authored in

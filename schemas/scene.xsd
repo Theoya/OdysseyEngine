@@ -61,6 +61,10 @@
     <xs:attribute name="id"        type="xs:string"             use="required"/>
     <xs:attribute name="archetype" type="xs:string"             use="required"/>
     <xs:attribute name="count"     type="xs:positiveInteger"    default="1"/>
+    <!-- Phase 9: Optional parent reference (entity id string). When absent, entity
+         is top-level. When present, references another entity's id attribute.
+         Cycles and missing parents are rejected at load time. -->
+    <xs:attribute name="parent"    type="xs:string"             use="optional"/>
     <xs:anyAttribute processContents="skip"/>
   </xs:complexType>
 

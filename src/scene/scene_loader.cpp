@@ -23,7 +23,7 @@ static const std::unordered_set<std::string>& known_scene_attrs() {
 }
 
 static const std::unordered_set<std::string>& known_entity_attrs() {
-    static const std::unordered_set<std::string> s{"id", "archetype", "count"};
+    static const std::unordered_set<std::string> s{"id", "archetype", "count", "parent"};
     return s;
 }
 
@@ -166,6 +166,7 @@ static Result<bool> parse_entity_node(const pugi::xml_node& entity_node,
     desc.id = entity_node.attribute("id").as_string("");
     desc.archetype = entity_node.attribute("archetype").as_string("");
     desc.count = entity_node.attribute("count").as_uint(1);
+    desc.parent_id = entity_node.attribute("parent").as_string("");
 
     // Capture unknown attributes in insertion order.
     const auto& known = known_entity_attrs();
@@ -388,11 +389,18 @@ Result<SceneData> load_scene_file(const std::filesystem::path& path) {
 }
 
 void populate_entities(EntityManager& manager, const SceneData& scene) {
+    // Phase 1: Create all entities and populate components.
+    // Phase 2: Resolve parent references by entity ID name.
+    std::unordered_map<std::string, EntityID> id_map;  // entity.id -> EntityID
+
     for (const auto& desc : scene.entities) {
         if (desc.count <= 1) {
             // Single entity
             std::string name = desc.id.empty() ? desc.archetype : desc.id;
             EntityID id = manager.create_entity(name, desc.archetype);
+            if (!desc.id.empty()) {
+                id_map[desc.id] = id;
+            }
 
             Entity* entity = manager.get_entity(id);
             if (entity) {
@@ -405,6 +413,7 @@ void populate_entities(EntityManager& manager, const SceneData& scene) {
                 entity->components.script_config = desc.script_config;
                 entity->components.voice_range = desc.voice_range;
                 entity->components.tags = desc.tags;
+                // Phase 9: parent_id will be resolved after all entities created
             }
         } else {
             // Batch spawn
@@ -449,6 +458,37 @@ void populate_entities(EntityManager& manager, const SceneData& scene) {
                 }
             }
         }
+    }
+
+    // Phase 2: Resolve parent references and validate hierarchy.
+    for (const auto& desc : scene.entities) {
+        if (desc.parent_id.empty()) continue;
+
+        auto it = id_map.find(desc.parent_id);
+        if (it == id_map.end()) {
+            spdlog::warn("Entity '{}' references unknown parent '{}'",
+                         desc.id.empty() ? desc.archetype : desc.id,
+                         desc.parent_id);
+            continue;
+        }
+
+        // Resolve for single entity
+        if (desc.count <= 1) {
+            auto it_child = id_map.find(desc.id.empty() ? desc.archetype : desc.id);
+            if (it_child != id_map.end()) {
+                Entity* child = manager.get_entity(it_child->second);
+                if (child) {
+                    child->parent_id = it->second;
+                }
+            }
+        }
+        // Note: batch-spawned entities don't get parent_id (they're spawned with local origins)
+    }
+
+    // Compose world transforms (topological sort on parent graph).
+    auto compose_result = manager.compose_world_transforms();
+    if (compose_result.is_err()) {
+        spdlog::error("Failed to compose world transforms: hierarchy error");
     }
 
     spdlog::info("Populated {} entities from scene data", manager.entity_count());
