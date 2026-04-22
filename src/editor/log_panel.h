@@ -7,6 +7,7 @@
 // ---------------------------------------------------------------------------
 
 #include "editor/panel.h"
+#include "editor/mode_enum.h"
 
 #include <spdlog/sinks/base_sink.h>
 
@@ -65,6 +66,13 @@ private:
     std::string name_ = "Log";
     std::shared_ptr<EditorLogSink> sink_;
     bool auto_scroll_ = true;
+    bool show_info_ = true;
+    bool show_warn_ = true;
+    bool show_error_ = true;
+    char search_buf_[256] = {};  // ImGui search buffer
+    bool collapse_duplicates_ = false;
+    bool clear_on_play_ = false;
+    Mode last_mode_ = Mode::Edit;  // Track mode transitions for Clear-on-Play
 };
 
 } // namespace odyssey::editor

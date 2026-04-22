@@ -1,0 +1,29 @@
+{
+  "gender": "male",
+  "engine_bones_built": 19,
+  "vertex_groups_final": 19,
+  "verts_total": 19158,
+  "verts_driven_weight_sum_1": 19158,
+  "per_group_vertex_counts": {
+    "hand_l": 1897,
+    "hand_r": 1896,
+    "head": 5757,
+    "foot_l": 1712,
+    "foot_r": 1585,
+    "root": 2322,
+    "spine": 1755,
+    "chest": 3204,
+    "shoulder_l": 856,
+    "shoulder_r": 826,
+    "neck": 1160,
+    "upper_arm_l": 1096,
+    "upper_arm_r": 1076,
+    "lower_arm_l": 566,
+    "lower_arm_r": 570,
+    "upper_leg_l": 1520,
+    "upper_leg_r": 1519,
+    "lower_leg_l": 1018,
+    "lower_leg_r": 1015
+  },
+  "skin_approach": "v2_mpfb_rest_positions"
+}

@@ -1,9 +1,16 @@
 #include "editor/log_panel.h"
 #include "editor/editor.h"
+#include "editor/log_filter.h"
+#include "editor/mode_enum.h"
 
 #include <imgui.h>
 #include <spdlog/spdlog.h>
 #include <spdlog/pattern_formatter.h>
+
+#include <windows.h>
+#include <commdlg.h>
+#include <fstream>
+#include <string>
 
 namespace odyssey::editor {
 
@@ -73,7 +80,7 @@ static ImU32 color_for_level(int level) {
     }
 }
 
-void LogPanel::draw(EditorState& /*state*/) {
+void LogPanel::draw(EditorState& state) {
     if (!visible_) return;
 
     if (!ImGui::Begin(name_.c_str(), &visible_)) {
@@ -81,23 +88,101 @@ void LogPanel::draw(EditorState& /*state*/) {
         return;
     }
 
+    // --- Clear-on-Play edge trigger ---
+    if (clear_on_play_ && state.mode == Mode::Play && last_mode_ != Mode::Play) {
+        sink_->buffer().clear();
+    }
+    last_mode_ = state.mode;
+
+    // --- Control row 1: Clear, Auto-scroll, Clear-on-Play ---
     if (ImGui::Button("Clear")) {
         sink_->buffer().clear();
     }
     ImGui::SameLine();
     ImGui::Checkbox("Auto-scroll", &auto_scroll_);
     ImGui::SameLine();
+    ImGui::Checkbox("Clear on Play", &clear_on_play_);
+    ImGui::SameLine();
     ImGui::TextDisabled("(%zu)", sink_->buffer().size());
+
+    // --- Level filters + counts ---
+    const auto& rb = sink_->buffer();
+    std::vector<LogRow> rows;
+    for (size_t i = 0; i < rb.size(); ++i) {
+        const auto& e = rb.at(i);
+        rows.push_back(LogRow{e.level, e.text});
+    }
+    auto counts = count_by_level(rows);
+
+    ImGui::SameLine();
+    ImGui::TextDisabled("|");
+    ImGui::SameLine();
+    ImGui::Checkbox("Info", &show_info_);
+    ImGui::SameLine();
+    ImGui::TextDisabled("(%d)", counts.info);
+    ImGui::SameLine();
+    ImGui::Checkbox("Warn", &show_warn_);
+    ImGui::SameLine();
+    ImGui::TextDisabled("(%d)", counts.warn);
+    ImGui::SameLine();
+    ImGui::Checkbox("Error", &show_error_);
+    ImGui::SameLine();
+    ImGui::TextDisabled("(%d)", counts.error);
+
+    // --- Search + Collapse + Export ---
+    ImGui::InputText("##search", search_buf_, sizeof(search_buf_));
+    ImGui::SameLine();
+    ImGui::Checkbox("Collapse dups", &collapse_duplicates_);
+    ImGui::SameLine();
+    if (ImGui::SmallButton("Export...")) {
+        // Win32 GetSaveFileNameW dialog
+        OPENFILENAMEW ofn = {};
+        wchar_t szFile[260] = L"";
+        ofn.lStructSize = sizeof(ofn);
+        ofn.lpstrFile = szFile;
+        ofn.nMaxFile = sizeof(szFile) / sizeof(szFile[0]);
+        ofn.lpstrFilter = L"Log Files (*.log)\0*.log\0All Files (*.*)\0*.*\0";
+        ofn.lpstrDefExt = L"log";
+        ofn.Flags = OFN_OVERWRITEPROMPT | OFN_NONETWORKBUTTON;
+        if (GetSaveFileNameW(&ofn)) {
+            // Convert wide string to std::string and write the buffer
+            int size_needed = WideCharToMultiByte(CP_UTF8, 0, &szFile[0], (int)wcslen(szFile), NULL, 0, NULL, NULL);
+            std::string file_path(size_needed, 0);
+            WideCharToMultiByte(CP_UTF8, 0, &szFile[0], (int)wcslen(szFile), &file_path[0], size_needed, NULL, NULL);
+
+            std::ofstream out(file_path, std::ios::out);
+            if (out.is_open()) {
+                for (size_t i = 0; i < rb.size(); ++i) {
+                    out << rb.at(i).text << "\n";
+                }
+                out.close();
+                spdlog::info("[editor] log exported to '{}'", file_path);
+            }
+        }
+    }
 
     ImGui::Separator();
 
+    // --- Apply filters ---
+    LogFilterState filter_state;
+    filter_state.show_info = show_info_;
+    filter_state.show_warn = show_warn_;
+    filter_state.show_error = show_error_;
+    filter_state.search_substr = std::string(search_buf_);
+    filter_state.collapse_duplicates = collapse_duplicates_;
+
+    auto filtered = apply_log_filter(rows, filter_state);
+
     if (ImGui::BeginChild("##logscroll", ImVec2(0, 0), false,
                           ImGuiWindowFlags_HorizontalScrollbar)) {
-        const auto& rb = sink_->buffer();
-        for (size_t i = 0; i < rb.size(); ++i) {
-            const auto& e = rb.at(i);
-            ImGui::PushStyleColor(ImGuiCol_Text, color_for_level(e.level));
-            ImGui::TextUnformatted(e.text.c_str());
+        for (const auto& display_row : filtered) {
+            ImGui::PushStyleColor(ImGuiCol_Text, color_for_level(display_row.row.level));
+            if (display_row.count > 1) {
+                ImGui::TextUnformatted(
+                    (display_row.row.msg + " (x" + std::to_string(display_row.count) + ")").c_str());
+            } else {
+                ImGui::TextUnformatted(display_row.row.msg.c_str());
+            }
             ImGui::PopStyleColor();
         }
         if (auto_scroll_ && ImGui::GetScrollY() >= ImGui::GetScrollMaxY() - 4.0f) {

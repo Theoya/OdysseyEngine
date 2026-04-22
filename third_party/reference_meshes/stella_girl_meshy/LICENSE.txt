@@ -1,0 +1,22 @@
+Stella Girl — © golden4445 (Sketchfab)
+Licensed under Creative Commons Attribution 4.0 International (CC-BY 4.0)
+https://creativecommons.org/licenses/by/4.0/
+
+You are free to:
+  - Share — copy and redistribute the material in any medium or format
+  - Adapt — remix, transform, and build upon the material for any purpose, even commercially
+
+Under the following terms:
+  - Attribution — You must give appropriate credit, provide a link to the license,
+    and indicate if changes were made. You may do so in any reasonable manner,
+    but not in any way that suggests the licensor endorses you or your use.
+
+Required attribution line if any derivative of this asset ships:
+  "Stella Girl" by golden4445 (https://sketchfab.com/3d-models/stella-girl-08f81fedb4224ceab1a0424edde278ba)
+  licensed under CC-BY 4.0 (https://creativecommons.org/licenses/by/4.0/)
+
+Retrieved: 2026-04-21 for OdysseyEngine reference / study use only.
+This asset is NOT integrated into any shipped game build as of 2026-04-21 —
+it sits in third_party/reference_meshes/ purely as a Meshy AI output sample
+for pipeline research. If it later ships in any form, the attribution above
+MUST appear in the game's credits / third-party notices.

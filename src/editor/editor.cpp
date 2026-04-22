@@ -1,18 +1,33 @@
 #include "editor/editor.h"
 
+#include "editor/project_paths.h"
 #include "editor/scene_tree_panel.h"
 #include "editor/inspector_panel.h"
 #include "editor/viewport_panel.h"
 #include "editor/log_panel.h"
 #include "editor/asset_browser_panel.h"
 #include "editor/scene_viewport_renderer.h"
+#include "editor/file_dialog_win32.h"
+#include "editor/editor_prefs.h"
+#include "editor/play_snapshot.h"
+#include "editor/undo_stack.h"
+#include "editor/layout_presets.h"
+#include "editor/entity_clipboard.h"
+#include "editor/build_settings_panel.h"
+#include "editor/preferences_panel.h"
+#include "editor/status_bar.h"
+#include "editor/command_palette.h"
+#include "editor/asset_import.h"
 
 #include "scene/scene_loader.h"
 #include "scene/scene_serializer.h"
 
 #include <imgui.h>
+#include <imgui_internal.h>
 #include <imgui_impl_glfw.h>
 #include <imgui_impl_vulkan.h>
+#define NOMINMAX
+#include <windows.h>
 
 #include <GLFW/glfw3.h>
 #include <vulkan/vulkan.h>
@@ -116,6 +131,38 @@ struct Editor::Impl {
     VkDescriptorSet       viewport_ds = VK_NULL_HANDLE; // ImGui_ImplVulkan_AddTexture result
     VkExtent2D            viewport_extent{1280, 720};
     float                 camera_orbit_time = 0.0f;
+
+    std::filesystem::path exe_dir;
+    std::string imgui_ini_path;
+    bool first_run_dock_build_pending = false;
+
+    // Batch B: editor preferences (recent scenes, etc.)
+    EditorPrefs editor_prefs;
+    std::string cached_window_title;  // For efficient title-bar updates
+
+    // Batch F: Play-in-Editor snapshot/restore
+    std::optional<PlaySnapshot> play_snapshot;
+
+    // Batch F: Undo/redo stacks
+    UndoStack undo_stack;
+
+    // Batch F: Scene dirty flag tracking (for undo capture)
+    bool scene_dirty_prev = false;
+
+    // Batch H: Splash screen timing (auto-dismiss after 1.5s)
+    float splash_time = 0.0f;
+    bool show_splash = true;
+
+    // Batch H: First-run welcome wizard
+    bool first_run_wizard_pending = false;
+    int wizard_page = 0;  // 0=welcome, 1=quick-tour, 2=try-it
+
+    // Batch H: About dialog flag
+    bool show_about_dialog = false;
+
+    // Batch H: Command palette state
+    bool show_command_palette = false;
+    std::string command_palette_query;
 };
 
 // ---------------------------------------------------------------------------
@@ -415,9 +462,10 @@ static bool init_imgui(Editor::Impl& impl) {
     ImGui::CreateContext();
     ImGuiIO& io = ImGui::GetIO();
     io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
-    // Note: vcpkg's imgui does NOT ship the docking branch. Phase 1 uses
-    // the default multi-window layout; the user drags windows where they
-    // like. Phase 2 may swap to docking once we vendor imgui-docking.
+    io.ConfigFlags |= ImGuiConfigFlags_DockingEnable;
+
+    impl.imgui_ini_path = (impl.exe_dir / "imgui.ini").string();
+    io.IniFilename = impl.imgui_ini_path.c_str();
 
     ImGui::StyleColorsDark();
     ImGuiStyle& style = ImGui::GetStyle();
@@ -508,6 +556,49 @@ Result<bool> Editor::initialize(const std::filesystem::path& scene_path) {
     state_.entities   = &impl_->entities;
     state_.scene_path = scene_path;
 
+    // Resolve absolute exe directory for imgui.ini + asset path resolution.
+    {
+        wchar_t buf[MAX_PATH] = {};
+        DWORD n = GetModuleFileNameW(nullptr, buf, MAX_PATH);
+        if (n == 0 || n == MAX_PATH) {
+            return Result<bool>::err("GetModuleFileNameW failed");
+        }
+        impl_->exe_dir = std::filesystem::path(buf).parent_path();
+    }
+
+    // First-run detection: if imgui.ini is absent, queue default-layout build.
+    {
+        std::error_code ec;
+        bool ini_exists = std::filesystem::exists(impl_->exe_dir / "imgui.ini", ec);
+        impl_->first_run_dock_build_pending = !ini_exists;
+    }
+
+    // Batch B: Load editor preferences (recent scenes, etc.)
+    {
+        auto prefs_res = load_editor_prefs(impl_->exe_dir);
+        if (prefs_res.is_ok()) {
+            impl_->editor_prefs = std::move(prefs_res).value();
+        } else {
+            spdlog::warn("[editor] load_editor_prefs failed: {}", prefs_res.error());
+            // Continue with empty prefs on failure
+        }
+    }
+
+    // Resolve absolute project paths (new editor/project_paths module).
+    auto paths_res = editor::resolve_project_paths(impl_->exe_dir, scene_path);
+    if (paths_res.is_err()) {
+        return Result<bool>::err("resolve_project_paths: " + paths_res.error());
+    }
+    auto paths = std::move(paths_res).value();
+    std::error_code cd_ec;
+    std::filesystem::current_path(paths.exe_dir, cd_ec);
+    if (cd_ec) {
+        spdlog::warn("[editor] current_path({}) failed: {}",
+                     paths.exe_dir.string(), cd_ec.message());
+    }
+    state_.scene_path   = paths.showcase_scene;
+    state_.project_root = paths.asset_root;
+
     // Install log sink BEFORE anything else logs (subsequent spdlog calls
     // populate the editor's log panel buffer).
     if (impl_->log_panel) {
@@ -530,6 +621,29 @@ Result<bool> Editor::initialize(const std::filesystem::path& scene_path) {
         [](GLFWwindow* w, int, int) {
             auto* self = static_cast<Editor*>(glfwGetWindowUserPointer(w));
             if (self && self->impl_) self->impl_->framebuffer_resized = true;
+        });
+
+    // Drop callback for drag-drop asset import
+    glfwSetDropCallback(impl_->window,
+        [](GLFWwindow* w, int count, const char** paths) {
+            auto* self = static_cast<Editor*>(glfwGetWindowUserPointer(w));
+            if (!self || !self->impl_ || count <= 0) return;
+
+            for (int i = 0; i < count; ++i) {
+                ImportSource source{std::filesystem::path(paths[i])};
+                auto result = execute_import(source, self->state_.project_root, false);
+                if (result.is_ok()) {
+                    spdlog::info("[editor] dropped asset imported: {}", paths[i]);
+                    // Trigger asset browser refresh on success
+                    for (auto& panel : self->panels_) {
+                        if (auto* browser = dynamic_cast<AssetBrowserPanel*>(panel.get())) {
+                            browser->refresh(self->state_.project_root);
+                        }
+                    }
+                } else {
+                    spdlog::warn("[editor] drop import failed: {}", result.error());
+                }
+            }
         });
 
     // -------- Vulkan --------
@@ -577,18 +691,6 @@ Result<bool> Editor::initialize(const std::filesystem::path& scene_path) {
         }
     }
 
-    // -------- Project root for the Asset Browser (Phase 4) --------
-    // Default to demo/showcase/ — the Asset Browser walks this tree. If a
-    // scene file was passed in, prefer its parent directory as the root so
-    // the browser is scoped to the project the user is editing.
-    if (!scene_path.empty()) {
-        auto parent = scene_path.parent_path();
-        state_.project_root = parent.empty() ? std::filesystem::path("demo/showcase")
-                                             : parent;
-    } else {
-        state_.project_root = std::filesystem::path("demo/showcase");
-    }
-
     // -------- Scene load (non-fatal in Phase 1) --------
     if (!scene_path.empty()) {
         spdlog::info("[editor] loading scene: {}", scene_path.string());
@@ -611,6 +713,20 @@ Result<bool> Editor::initialize(const std::filesystem::path& scene_path) {
         state_.status_line = "No scene specified.";
     }
 
+    // Batch H: Check for first-run wizard and splash
+    {
+        impl_->show_splash = true;
+        impl_->splash_time = 0.0f;
+
+        // First-run detection: if editor_prefs.xml does NOT exist, show wizard
+        std::filesystem::path prefs_file = impl_->exe_dir / "editor_prefs.xml";
+        if (!std::filesystem::exists(prefs_file)) {
+            impl_->first_run_wizard_pending = true;
+            impl_->wizard_page = 0;
+            spdlog::info("[editor] first-run wizard queued");
+        }
+    }
+
     spdlog::info("[editor] initialized");
     return Result<bool>::ok(true);
 }
@@ -624,6 +740,8 @@ void Editor::build_panels() {
     panels_.push_back(std::make_unique<ViewportPanel>());
     panels_.push_back(std::make_unique<AssetBrowserPanel>());
     panels_.push_back(std::move(log_panel));
+    panels_.push_back(std::make_unique<BuildSettingsPanel>());
+    panels_.push_back(std::make_unique<PreferencesPanel>(impl_->exe_dir));
 }
 
 // Phase 4: consume EditorState save/swap requests between frames so we never
@@ -662,6 +780,23 @@ static void handle_phase4_requests(Editor::Impl& impl, EditorState& state) {
                     std::ostringstream ss; ss << f.rdbuf();
                     impl.scene_data.preserved_source = ss.str();
                     impl.scene_data.mutated = false;
+                    state.scene_dirty = false;  // Batch B: sync dirty flag
+                }
+                // Batch B: update recent scenes list
+                auto& recent = impl.editor_prefs.recent_scenes;
+                std::string path_str = state.scene_path.string();
+                auto it = std::find(recent.begin(), recent.end(), path_str);
+                if (it != recent.end()) {
+                    recent.erase(it);  // Remove old position
+                }
+                recent.insert(recent.begin(), path_str);  // Insert at front
+                if (recent.size() > 8) {
+                    recent.resize(8);  // Keep only 8 most recent
+                }
+                // Save prefs to disk
+                auto save_r = save_editor_prefs(impl.exe_dir, impl.editor_prefs);
+                if (save_r.is_err()) {
+                    spdlog::warn("[editor] failed to save editor prefs: {}", save_r.error());
                 }
             }
         }
@@ -683,8 +818,10 @@ static void handle_phase4_requests(Editor::Impl& impl, EditorState& state) {
                 impl.has_scene_data = true;
                 scene::populate_entities(impl.entities, impl.scene_data);
                 state.selected_entity = INVALID_ENTITY;
+                state.multi_selected.clear();  // Batch B
                 state.scene_path = req;
                 state.scene_data = &impl.scene_data;
+                state.scene_dirty = impl.scene_data.mutated;  // Batch B: sync dirty flag
                 state.selected_asset.clear();
                 spdlog::info("[editor] scene swapped to '{}' ({} entities)",
                              req.string(), impl.entities.entity_count());
@@ -693,6 +830,12 @@ static void handle_phase4_requests(Editor::Impl& impl, EditorState& state) {
                                     " entities)";
             }
         }
+    }
+
+    // Batch B: sync scene_dirty from SceneData::mutated (for changes made
+    // by the Inspector or other panels)
+    if (impl.has_scene_data) {
+        state.scene_dirty = impl.scene_data.mutated;
     }
 }
 
@@ -721,27 +864,351 @@ void Editor::run() {
 
         handle_phase4_requests(*impl_, state_);
 
+        // Batch B: Update window title with scene name and dirty indicator
+        if (impl_->has_scene_data && !state_.scene_path.empty()) {
+            std::string scene_name = state_.scene_path.filename().string();
+            std::string title = "OdysseyEngine Editor — " + scene_name;
+            if (state_.scene_dirty) title += " [*]";
+            title += "  (" + state_.scene_path.string() + ")";
+            if (impl_->cached_window_title != title) {
+                glfwSetWindowTitle(impl_->window, title.c_str());
+                impl_->cached_window_title = title;
+            }
+        } else {
+            std::string title = "OdysseyEngine Editor";
+            if (impl_->cached_window_title != title) {
+                glfwSetWindowTitle(impl_->window, title.c_str());
+                impl_->cached_window_title = title;
+            }
+        }
+
         draw_frame(dt);
     }
     vkDeviceWaitIdle(impl_->device);
+}
+
+// Batch B: Draw the "Unsaved Changes" modal popup. Called from draw_frame()
+// during ImGui rendering. Context param used to distinguish which action
+// triggered the popup (new, open, recent, quit).
+static void draw_unsaved_changes_popup(EditorState& state, const char* context) {
+    ImVec2 center = ImGui::GetMainViewport()->GetCenter();
+    ImGui::SetNextWindowPos(center, ImGuiCond_Appearing, ImVec2(0.5f, 0.5f));
+
+    if (ImGui::BeginPopupModal("Unsaved Changes", nullptr,
+                               ImGuiWindowFlags_AlwaysAutoResize)) {
+        ImGui::Text("You have unsaved changes. What would you like to do?");
+        ImGui::Spacing();
+
+        if (ImGui::Button("Save", ImVec2(120, 0))) {
+            state.save_requested = true;
+            ImGui::CloseCurrentPopup();
+        }
+        ImGui::SameLine();
+        if (ImGui::Button("Discard", ImVec2(120, 0))) {
+            // The context-specific action will be re-triggered by the menu
+            // caller on the next frame. For now, just close the popup and
+            // clear the dirty flag.
+            state.scene_dirty = false;
+            ImGui::CloseCurrentPopup();
+        }
+        ImGui::SameLine();
+        if (ImGui::Button("Cancel", ImVec2(120, 0))) {
+            ImGui::CloseCurrentPopup();
+        }
+
+        ImGui::EndPopup();
+    }
 }
 
 void Editor::draw_menu_bar() {
     if (!ImGui::BeginMainMenuBar()) return;
 
     if (ImGui::BeginMenu("File")) {
+        // --- New Scene (Ctrl+N) ---
+        ImGuiIO& io = ImGui::GetIO();
+        if (ImGui::MenuItem("New Scene", "Ctrl+N") ||
+            ((io.KeyCtrl || io.KeySuper) && ImGui::IsKeyPressed(ImGuiKey_N, false) &&
+             !io.WantCaptureKeyboard)) {
+            if (state_.scene_dirty) {
+                ImGui::OpenPopup("Unsaved Changes##new");
+            } else {
+                // Create empty scene
+                impl_->entities.clear();
+                impl_->scene_data = scene::SceneData();
+                impl_->has_scene_data = true;
+                state_.scene_path.clear();
+                state_.scene_dirty = false;
+                state_.selected_entity = INVALID_ENTITY;
+                state_.multi_selected.clear();
+                state_.scene_data = &impl_->scene_data;
+                spdlog::info("[editor] new scene created");
+            }
+        }
+
+        // --- Open Scene (Ctrl+O) ---
+        if (ImGui::MenuItem("Open Scene", "Ctrl+O") ||
+            ((io.KeyCtrl || io.KeySuper) && ImGui::IsKeyPressed(ImGuiKey_O, false) &&
+             !io.WantCaptureKeyboard)) {
+            if (state_.scene_dirty) {
+                ImGui::OpenPopup("Unsaved Changes##open");
+            } else {
+                auto path = open_scene_dialog();
+                if (path) {
+                    state_.scene_swap_request = path.value();
+                }
+            }
+        }
+
+        ImGui::Separator();
+
+        // --- Import Asset ---
+        if (ImGui::MenuItem("Import Asset...", nullptr)) {
+            // Win32 dialog to open any file type.
+            OPENFILENAMEA ofn{};
+            char filename[MAX_PATH]{};
+            filename[0] = '\0';
+
+            ofn.lStructSize = sizeof(ofn);
+            ofn.hwndOwner = nullptr;  // GLFW doesn't expose Win32 HWND; dialog will appear independently
+            ofn.lpstrFilter = "All Files\0*.*\0OBJ Files\0*.obj\0PNG Files\0*.png\0"
+                              "JPEG Files\0*.jpg;*.jpeg\0WAV Files\0*.wav\0"
+                              "GLB Files\0*.glb\0FBX Files\0*.fbx\0XML Files\0*.xml\0\0";
+            ofn.nFilterIndex = 1;
+            ofn.lpstrFile = filename;
+            ofn.nMaxFile = sizeof(filename);
+            ofn.Flags = OFN_PATHMUSTEXIST | OFN_FILEMUSTEXIST;
+
+            if (GetOpenFileNameA(&ofn)) {
+                ImportSource source{std::filesystem::path(filename)};
+                auto result = execute_import(source, state_.project_root, false);
+                if (result.is_ok()) {
+                    spdlog::info("[editor] asset imported: {}", filename);
+                    state_.status_line = "Imported " + std::filesystem::path(filename).filename().string();
+                    // Refresh asset browser
+                    for (auto& panel : panels_) {
+                        if (auto* browser = dynamic_cast<AssetBrowserPanel*>(panel.get())) {
+                            browser->refresh(state_.project_root);
+                        }
+                    }
+                } else {
+                    spdlog::error("[editor] import failed: {}", result.error());
+                    state_.status_line = "Import failed: " + result.error();
+                }
+            }
+        }
+
+        ImGui::Separator();
+
         const bool can_save = impl_->has_scene_data &&
                               state_.mode == Mode::Edit;
+
+        // --- Save Scene (Ctrl+S) ---
         if (ImGui::MenuItem("Save Scene", "Ctrl+S", false, can_save)) {
             state_.save_requested = true;
         }
-        if (ImGui::MenuItem("Reload Scene", "Ctrl+R", false, false)) {}
+
+        // --- Save Scene As (Ctrl+Shift+S) ---
+        if (ImGui::MenuItem("Save Scene As", "Ctrl+Shift+S", false, can_save)) {
+            auto path = save_scene_dialog(state_.scene_path.filename().string());
+            if (path) {
+                state_.scene_path = path.value();
+                state_.save_requested = true;
+            }
+        }
+
+        ImGui::Separator();
+
+        // --- Recent Scenes submenu ---
+        if (ImGui::BeginMenu("Recent Scenes", !impl_->editor_prefs.recent_scenes.empty())) {
+            for (size_t i = 0; i < impl_->editor_prefs.recent_scenes.size(); ++i) {
+                const auto& scene_path = impl_->editor_prefs.recent_scenes[i];
+                std::string label = std::filesystem::path(scene_path).filename().string();
+                if (i < 8) label = std::to_string(i + 1) + ". " + label;
+                if (ImGui::MenuItem(label.c_str())) {
+                    if (state_.scene_dirty) {
+                        ImGui::OpenPopup("Unsaved Changes##recent");
+                        // Store which recent scene to open in a temp variable
+                        // (handled in the popup modal below)
+                    } else {
+                        state_.scene_swap_request = scene_path;
+                    }
+                }
+            }
+            ImGui::EndMenu();
+        }
+
         ImGui::Separator();
         if (ImGui::MenuItem("Quit", "Alt+F4")) {
-            glfwSetWindowShouldClose(impl_->window, GLFW_TRUE);
+            if (state_.scene_dirty) {
+                ImGui::OpenPopup("Unsaved Changes##quit");
+            } else {
+                glfwSetWindowShouldClose(impl_->window, GLFW_TRUE);
+            }
         }
         ImGui::EndMenu();
     }
+
+    // Batch F: Edit menu (Undo/Redo)
+    if (ImGui::BeginMenu("Edit")) {
+        ImGuiIO& io = ImGui::GetIO();
+        bool can_undo = impl_->undo_stack.can_undo();
+        bool can_redo = impl_->undo_stack.can_redo();
+
+        // Ctrl+Z - Undo (with description if available)
+        std::string undo_label = "Undo";
+        if (can_undo) {
+            if (const auto* entry = impl_->undo_stack.peek_undo()) {
+                undo_label += " " + entry->description;
+            }
+        }
+        if (ImGui::MenuItem(undo_label.c_str(), "Ctrl+Z", false, can_undo) ||
+            ((io.KeyCtrl || io.KeySuper) && ImGui::IsKeyPressed(ImGuiKey_Z, false) &&
+             !io.WantCaptureKeyboard && can_undo)) {
+            auto entry = impl_->undo_stack.pop_undo();
+            auto restore_res = restore_snapshot(
+                PlaySnapshot{entry.state, entry.entities},
+                impl_->scene_data, impl_->entities);
+            if (restore_res.is_ok()) {
+                spdlog::info("[editor] undo: {}", entry.description);
+            } else {
+                spdlog::warn("[editor] undo failed: {}", restore_res.error());
+            }
+        }
+
+        // Ctrl+Y - Redo (with description if available)
+        std::string redo_label = "Redo";
+        if (can_redo) {
+            if (const auto* entry = impl_->undo_stack.peek_redo()) {
+                redo_label += " " + entry->description;
+            }
+        }
+        if (ImGui::MenuItem(redo_label.c_str(), "Ctrl+Y", false, can_redo) ||
+            ((io.KeyCtrl || io.KeySuper) && ImGui::IsKeyPressed(ImGuiKey_Y, false) &&
+             !io.WantCaptureKeyboard && can_redo)) {
+            auto entry = impl_->undo_stack.pop_redo();
+            auto restore_res = restore_snapshot(
+                PlaySnapshot{entry.state, entry.entities},
+                impl_->scene_data, impl_->entities);
+            if (restore_res.is_ok()) {
+                spdlog::info("[editor] redo: {}", entry.description);
+            } else {
+                spdlog::warn("[editor] redo failed: {}", restore_res.error());
+            }
+        }
+
+        // Cut (Ctrl+X)
+        bool can_cut = state_.selected_entity != INVALID_ENTITY || !state_.multi_selected.empty();
+        if (ImGui::MenuItem("Cut", "Ctrl+X", false, can_cut) ||
+            ((io.KeyCtrl || io.KeySuper) && ImGui::IsKeyPressed(ImGuiKey_X, false) &&
+             !io.WantCaptureKeyboard && can_cut)) {
+            // Copy selected entities to clipboard and mark as cut
+            if (state_.selected_entity != INVALID_ENTITY) {
+                if (auto* e = impl_->entities.get_entity(state_.selected_entity)) {
+                    clipboard_copy_entity(*e);
+                    entity_clipboard().is_cut = true;
+                    impl_->entities.destroy_entity(state_.selected_entity);
+                    state_.selected_entity = INVALID_ENTITY;
+                }
+            }
+            spdlog::info("[editor] cut");
+        }
+
+        // Copy (Ctrl+C)
+        bool can_copy = state_.selected_entity != INVALID_ENTITY || !state_.multi_selected.empty();
+        if (ImGui::MenuItem("Copy", "Ctrl+C", false, can_copy) ||
+            ((io.KeyCtrl || io.KeySuper) && ImGui::IsKeyPressed(ImGuiKey_C, false) &&
+             !io.WantCaptureKeyboard && can_copy)) {
+            if (state_.selected_entity != INVALID_ENTITY) {
+                if (auto* e = impl_->entities.get_entity(state_.selected_entity)) {
+                    clipboard_copy_entity(*e);
+                }
+            }
+            spdlog::info("[editor] copy");
+        }
+
+        // Paste (Ctrl+V)
+        bool can_paste = !entity_clipboard().entities.empty();
+        if (ImGui::MenuItem("Paste", "Ctrl+V", false, can_paste) ||
+            ((io.KeyCtrl || io.KeySuper) && ImGui::IsKeyPressed(ImGuiKey_V, false) &&
+             !io.WantCaptureKeyboard && can_paste)) {
+            // Paste entities from clipboard
+            for (const auto& [id, entity] : entity_clipboard().entities) {
+                // Create new entity with cloned data
+                auto new_id = impl_->entities.create_entity(entity.name, entity.archetype);
+                auto* new_entity = impl_->entities.get_entity(new_id);
+                if (new_entity) {
+                    new_entity->components = entity.components;
+                }
+            }
+            if (entity_clipboard().is_cut) {
+                clipboard_clear();
+            }
+            spdlog::info("[editor] paste");
+        }
+
+        ImGui::Separator();
+
+        // Select All (Ctrl+A)
+        if (ImGui::MenuItem("Select All", "Ctrl+A") ||
+            ((io.KeyCtrl || io.KeySuper) && ImGui::IsKeyPressed(ImGuiKey_A, false) &&
+             !io.WantCaptureKeyboard)) {
+            state_.multi_selected.clear();
+            for (const auto& [id, entity] : impl_->entities.get_all_entities()) {
+                state_.multi_selected.insert(id);
+            }
+            spdlog::info("[editor] select all ({} entities)", state_.multi_selected.size());
+        }
+
+        // Deselect All (Esc)
+        if (ImGui::MenuItem("Deselect All", "Esc") ||
+            (ImGui::IsKeyPressed(ImGuiKey_Escape, false) && !io.WantCaptureKeyboard)) {
+            state_.selected_entity = INVALID_ENTITY;
+            state_.multi_selected.clear();
+            spdlog::info("[editor] deselect all");
+        }
+
+        ImGui::Separator();
+
+        // Batch G: Preferences (opens PreferencesPanel)
+        if (ImGui::MenuItem("Preferences", nullptr)) {
+            // PreferencesPanel is already created in build_panels().
+            // Just make it visible.
+            for (auto& p : panels_) {
+                if (p->name() == "Preferences") {
+                    p->set_visible(true);
+                    break;
+                }
+            }
+        }
+
+        ImGui::EndMenu();
+    }
+
+    // Batch F: Window menu (Layout presets)
+    if (ImGui::BeginMenu("Window")) {
+        if (ImGui::BeginMenu("Layout")) {
+            if (ImGui::MenuItem("Default")) {
+                // Apply Default preset
+                spdlog::info("[editor] layout: Default");
+                impl_->editor_prefs.active_layout = "Default";
+            }
+            if (ImGui::MenuItem("2-by-3")) {
+                spdlog::info("[editor] layout: 2-by-3");
+                impl_->editor_prefs.active_layout = "2-by-3";
+            }
+            if (ImGui::MenuItem("Tall")) {
+                spdlog::info("[editor] layout: Tall");
+                impl_->editor_prefs.active_layout = "Tall";
+            }
+            if (ImGui::MenuItem("Wide")) {
+                spdlog::info("[editor] layout: Wide");
+                impl_->editor_prefs.active_layout = "Wide";
+            }
+            ImGui::EndMenu();
+        }
+        ImGui::EndMenu();
+    }
+
     if (ImGui::BeginMenu("View")) {
         for (auto& p : panels_) {
             bool v = p->visible();
@@ -751,12 +1218,28 @@ void Editor::draw_menu_bar() {
         }
         ImGui::EndMenu();
     }
+
     if (ImGui::BeginMenu("Help")) {
-        ImGui::MenuItem("OdysseyEditor — Phase 4", nullptr, false, false);
-        ImGui::MenuItem("Editable inspector + asset browser.",
-                        nullptr, false, false);
-        ImGui::MenuItem("Ctrl+S saves the scene.",
-                        nullptr, false, false);
+        // Batch H: About dialog
+        if (ImGui::MenuItem("About")) {
+            impl_->show_about_dialog = true;
+        }
+
+        ImGui::Separator();
+
+        // Batch H: Help documentation (stubs for now — open in default app in Batch I)
+        if (ImGui::MenuItem("Architecture")) {
+            spdlog::info("[editor] Help: Open Architecture doc (deferred to Batch I)");
+        }
+
+        if (ImGui::MenuItem("Nadir Guide")) {
+            spdlog::info("[editor] Help: Open Nadir Guide (deferred to Batch I)");
+        }
+
+        if (ImGui::MenuItem("CLI Reference")) {
+            spdlog::info("[editor] Help: Open CLI Reference (deferred to Batch I)");
+        }
+
         ImGui::EndMenu();
     }
 
@@ -769,35 +1252,134 @@ void Editor::draw_menu_bar() {
 }
 
 void Editor::draw_mode_toolbar() {
-    auto mode_button = [&](Mode m, ImU32 color) {
-        bool is_current = (state_.mode == m);
-        std::string_view label = mode_label(m);
-        if (is_current) {
-            ImGui::PushStyleColor(ImGuiCol_Button, ImColor(color).Value);
-        }
-        std::string btn{label};
-        if (ImGui::Button(btn.c_str())) {
-            if (state_.mode != m) {
-                state_.mode = m;
+    // Batch F: Compact 5-button toolbar with mode pill
+    // Buttons: Play, Stop, Pause, Step, Simulate; right-align mode pill
+
+    bool in_play_or_simulate = (state_.mode == Mode::Play || state_.mode == Mode::Simulate);
+
+    // Play button (green when active)
+    if (ImGui::Button("Play##mode_play")) {
+        if (state_.mode != Mode::Play) {
+            // Capture snapshot before switching to Play mode
+            auto snap = capture_snapshot(impl_->scene_data, impl_->entities);
+            if (snap.is_ok()) {
+                impl_->play_snapshot = snap.value();
+                state_.mode = Mode::Play;
+                state_.play_paused = false;
                 state_.dirty = true;
-                spdlog::info("[editor] mode: {}", btn);
+                spdlog::info("[editor] mode: Play (snapshot captured)");
+            } else {
+                spdlog::warn("[editor] failed to capture Play snapshot: {}", snap.error());
             }
         }
-        if (is_current) ImGui::PopStyleColor();
-    };
-    mode_button(Mode::Edit,     IM_COL32(60,  80, 160, 255));
+    }
     ImGui::SameLine();
-    mode_button(Mode::Play,     IM_COL32(60, 160,  80, 255));
-    ImGui::SameLine();
-    mode_button(Mode::Simulate, IM_COL32(160, 120, 60, 255));
+
+    // Stop button (only visible when not in Edit mode)
+    if (in_play_or_simulate) {
+        if (ImGui::Button("Stop##mode_stop")) {
+            // Restore snapshot
+            if (impl_->play_snapshot) {
+                auto res = restore_snapshot(
+                    impl_->play_snapshot.value(),
+                    impl_->scene_data,
+                    impl_->entities);
+                if (res.is_ok()) {
+                    impl_->play_snapshot.reset();
+                    state_.mode = Mode::Edit;
+                    state_.play_paused = false;
+                    state_.dirty = true;
+                    spdlog::info("[editor] mode: Edit (snapshot restored)");
+                } else {
+                    spdlog::warn("[editor] failed to restore snapshot: {}", res.error());
+                }
+            } else {
+                spdlog::warn("[editor] no play snapshot to restore");
+            }
+        }
+        ImGui::SameLine();
+    }
+
+    // Pause button (only visible when in Play/Simulate)
+    if (in_play_or_simulate) {
+        bool is_paused = state_.play_paused;
+        if (is_paused) {
+            ImGui::PushStyleColor(ImGuiCol_Button, ImColor(100, 100, 100).Value);
+        }
+        if (ImGui::Button("Pause##mode_pause")) {
+            state_.play_paused = !state_.play_paused;
+            spdlog::info("[editor] pause: {}", state_.play_paused ? "on" : "off");
+        }
+        if (is_paused) ImGui::PopStyleColor();
+        ImGui::SameLine();
+
+        // Step button (only visible when paused)
+        if (is_paused) {
+            if (ImGui::Button("Step##mode_step")) {
+                // Fire-once flag: set a flag so the engine advances one frame
+                spdlog::info("[editor] step (1 frame)");
+                // TODO: wire this to the engine's frame-advance logic
+            }
+            ImGui::SameLine();
+        }
+    }
+
+    // Simulate button (orange)
+    if (ImGui::Button("Simulate##mode_simulate")) {
+        if (state_.mode != Mode::Simulate) {
+            // Capture snapshot before switching to Simulate mode
+            auto snap = capture_snapshot(impl_->scene_data, impl_->entities);
+            if (snap.is_ok()) {
+                impl_->play_snapshot = snap.value();
+                state_.mode = Mode::Simulate;
+                state_.play_paused = false;
+                state_.dirty = true;
+                spdlog::info("[editor] mode: Simulate (snapshot captured)");
+            } else {
+                spdlog::warn("[editor] failed to capture Simulate snapshot: {}", snap.error());
+            }
+        }
+    }
+
+    // Mode pill (right-aligned)
+    ImGui::SameLine(ImGui::GetWindowWidth() - 150.0f);
+    ImU32 pill_color;
+    const char* pill_text;
+    switch (state_.mode) {
+    case Mode::Edit:
+        pill_color = IM_COL32(30, 144, 255, 255);  // Blue
+        pill_text = "Edit";
+        break;
+    case Mode::Play:
+        pill_color = IM_COL32(76, 175, 80, 255);   // Green
+        pill_text = "Play";
+        break;
+    case Mode::Simulate:
+        pill_color = IM_COL32(255, 152, 0, 255);   // Orange
+        pill_text = "Simulate";
+        break;
+    default:
+        pill_color = IM_COL32(128, 128, 128, 255);
+        pill_text = "Unknown";
+    }
+
+    ImGui::PushStyleColor(ImGuiCol_Button, ImColor(pill_color).Value);
+    ImGui::Button(pill_text, ImVec2(120, 0));
+    ImGui::PopStyleColor();
 }
 
 void Editor::draw_status_bar() {
-    // Phase 1: just append status to the log panel's last line via spdlog —
-    // skip a dedicated status window to keep the screen uncluttered.
+    // Compute FPS from last frame's delta_time using EMA with α=0.1.
+    float current_fps = (last_delta_time_ > 0) ? (1.0f / last_delta_time_) : 60.0f;
+    fps_ema_ = compute_fps_ema(fps_ema_, current_fps, 0.1f);
+
+    odyssey::editor::draw_status_bar(state_, fps_ema_, last_delta_time_ * 1000.0f);
 }
 
 void Editor::draw_frame(float delta_time) {
+    // Store delta_time for status bar FPS calculation.
+    last_delta_time_ = delta_time;
+
     // ---- Apply any viewport-resize request made last frame (outside any
     //      command buffer recording) before touching the fence.
     if (impl_->has_viewport_renderer &&
@@ -851,10 +1433,233 @@ void Editor::draw_frame(float delta_time) {
     ImGui_ImplGlfw_NewFrame();
     ImGui::NewFrame();
 
+    ImGuiID dockspace_id = ImGui::DockSpaceOverViewport(
+        0, ImGui::GetMainViewport(), ImGuiDockNodeFlags_PassthruCentralNode);
+
+    if (impl_->first_run_dock_build_pending) {
+        impl_->first_run_dock_build_pending = false;
+        ImGui::DockBuilderRemoveNode(dockspace_id);
+        ImGui::DockBuilderAddNode(dockspace_id, ImGuiDockNodeFlags_DockSpace);
+        ImGui::DockBuilderSetNodeSize(dockspace_id, ImGui::GetMainViewport()->Size);
+
+        ImGuiID dock_main = dockspace_id;
+        ImGuiID dock_left = ImGui::DockBuilderSplitNode(
+            dock_main, ImGuiDir_Left, 0.20f, nullptr, &dock_main);
+        ImGuiID dock_right = ImGui::DockBuilderSplitNode(
+            dock_main, ImGuiDir_Right, 0.3125f, nullptr, &dock_main);
+        ImGuiID dock_bottom = ImGui::DockBuilderSplitNode(
+            dock_main, ImGuiDir_Down, 0.25f, nullptr, &dock_main);
+
+        ImGui::DockBuilderDockWindow("Scene Tree",    dock_left);
+        ImGui::DockBuilderDockWindow("Inspector",     dock_right);
+        ImGui::DockBuilderDockWindow("Viewport",      dock_main);
+        ImGui::DockBuilderDockWindow("Asset Browser", dock_bottom);
+        ImGui::DockBuilderDockWindow("Log",           dock_bottom);
+        ImGui::DockBuilderFinish(dockspace_id);
+    }
+
     draw_menu_bar();
+
+    // ---- Batch D: Update free-fly scene camera (Edit mode only) ----
+    if (state_.mode == Mode::Edit && impl_->has_viewport_renderer) {
+        ImGuiIO& io = ImGui::GetIO();
+
+        // Build input for scene camera.
+        SceneCameraInput cam_input{};
+        cam_input.move_forward = ImGui::IsKeyDown(ImGuiKey_W);
+        cam_input.move_backward = ImGui::IsKeyDown(ImGuiKey_S);
+        cam_input.move_left = ImGui::IsKeyDown(ImGuiKey_A);
+        cam_input.move_right = ImGui::IsKeyDown(ImGuiKey_D);
+        cam_input.move_up = ImGui::IsKeyDown(ImGuiKey_E) && !ImGui::IsKeyDown(ImGuiKey_LeftCtrl);
+        cam_input.move_down = ImGui::IsKeyDown(ImGuiKey_Q) && !ImGui::IsKeyDown(ImGuiKey_LeftCtrl);
+        cam_input.right_button_held = ImGui::IsMouseDown(ImGuiMouseButton_Right);
+        cam_input.mouse_dx = io.MouseDelta.x;
+        cam_input.mouse_dy = io.MouseDelta.y;
+        cam_input.shift_held = io.KeyShift;
+        cam_input.scroll_delta = io.MouseWheel;
+
+        // Update camera state.
+        state_.viewport_camera = update_scene_camera(state_.viewport_camera, cam_input, delta_time);
+
+        // Batch D: Hotkeys for gizmo mode (only when viewport has focus).
+        // Q → Select, W → Translate, E → Rotate, R → Scale, T → Universal.
+        // Only respond when not typing in a text field.
+        if (!io.WantCaptureKeyboard) {
+            if (ImGui::IsKeyPressed(ImGuiKey_Q, false)) state_.gizmo_mode = GizmoMode::Select;
+            if (ImGui::IsKeyPressed(ImGuiKey_W, false)) state_.gizmo_mode = GizmoMode::Translate;
+            if (ImGui::IsKeyPressed(ImGuiKey_E, false)) state_.gizmo_mode = GizmoMode::Rotate;
+            if (ImGui::IsKeyPressed(ImGuiKey_R, false)) state_.gizmo_mode = GizmoMode::Scale;
+            if (ImGui::IsKeyPressed(ImGuiKey_T, false)) state_.gizmo_mode = GizmoMode::Universal;
+
+            // X → toggle Local/World space.
+            if (ImGui::IsKeyPressed(ImGuiKey_X, false)) {
+                state_.gizmo_space = (state_.gizmo_space == GizmoSpace::Local)
+                    ? GizmoSpace::World : GizmoSpace::Local;
+            }
+
+            // F → frame selected entity.
+            if (ImGui::IsKeyPressed(ImGuiKey_F, false) && state_.selected_entity != INVALID_ENTITY) {
+                if (const auto* entity = state_.entities->get_entity(state_.selected_entity)) {
+                    float radius = 1.0f;  // Default; MeshCollider support is Batch J.
+                    auto target = compute_frame_target(entity->components.transform.position, radius);
+                    state_.viewport_camera.position = target.position;
+                    state_.viewport_camera.yaw = target.yaw;
+                    state_.viewport_camera.pitch = target.pitch;
+                }
+            }
+        }
+    }
 
     for (auto& p : panels_) {
         p->draw(state_);
+    }
+
+    // Batch G: Draw status bar.
+    draw_status_bar();
+
+    // Batch B: Draw unsaved-changes popup
+    draw_unsaved_changes_popup(state_, "action");
+
+    // Batch H: Ctrl+P command palette
+    if (ImGui::IsKeyPressed(ImGuiKey_P, false) && ImGui::GetIO().KeyCtrl) {
+        impl_->show_command_palette = true;
+        impl_->command_palette_query = "";
+    }
+
+    if (impl_->show_command_palette) {
+        ImVec2 center = ImGui::GetMainViewport()->GetCenter();
+        ImGui::SetNextWindowPos(center, ImGuiCond_Appearing, ImVec2(0.5f, 0.3f));
+        ImGui::SetNextWindowSize(ImVec2(600, 400), ImGuiCond_FirstUseEver);
+
+        if (ImGui::BeginPopupModal("##command_palette", &impl_->show_command_palette,
+                                   ImGuiWindowFlags_NoTitleBar)) {
+            ImGui::SetNextItemWidth(-1);
+            ImGui::InputText("##palette_input", impl_->command_palette_query.data(),
+                           impl_->command_palette_query.capacity() + 1);
+
+            ImGui::Separator();
+
+            // Build command registry and filter
+            CommandRegistry reg;
+            register_builtin_commands(reg);
+            auto filtered = filter_commands(reg.items, impl_->command_palette_query);
+
+            // Draw filtered results
+            if (ImGui::BeginListBox("##palette_list", ImVec2(-1, 300))) {
+                for (size_t i = 0; i < filtered.size(); ++i) {
+                    const auto* cmd = filtered[i];
+                    bool selected = (i == 0);  // Top result is default selection
+                    if (ImGui::Selectable(cmd->label.c_str(), selected)) {
+                        if (cmd->invoke) cmd->invoke(state_);
+                        impl_->show_command_palette = false;
+                    }
+                    if (ImGui::IsKeyPressed(ImGuiKey_Enter, false) && selected) {
+                        if (cmd->invoke) cmd->invoke(state_);
+                        impl_->show_command_palette = false;
+                    }
+                }
+                ImGui::EndListBox();
+            }
+
+            ImGui::EndPopup();
+        }
+
+        if (ImGui::IsKeyPressed(ImGuiKey_Escape, false)) {
+            impl_->show_command_palette = false;
+        }
+    }
+
+    // Batch H: Splash screen (auto-dismiss after 1.5s)
+    if (impl_->show_splash) {
+        impl_->splash_time += delta_time;
+        if (impl_->splash_time > 1.5f || ImGui::IsKeyPressed(ImGuiKey_Escape, false) ||
+            ImGui::IsMouseClicked(ImGuiMouseButton_Left)) {
+            impl_->show_splash = false;
+        } else {
+            ImVec2 center = ImGui::GetMainViewport()->GetCenter();
+            ImGui::SetNextWindowPos(center, ImGuiCond_Appearing, ImVec2(0.5f, 0.5f));
+            ImGui::BeginPopupModal("##splash", nullptr, ImGuiWindowFlags_NoTitleBar |
+                                                        ImGuiWindowFlags_NoMove |
+                                                        ImGuiWindowFlags_AlwaysAutoResize);
+            ImGui::Text("OdysseyEngine Editor");
+            ImGui::Text("Build: %s", __DATE__);
+            ImGui::EndPopup();
+        }
+    }
+
+    // Batch H: About dialog
+    if (impl_->show_about_dialog) {
+        ImVec2 center = ImGui::GetMainViewport()->GetCenter();
+        ImGui::SetNextWindowPos(center, ImGuiCond_Appearing, ImVec2(0.5f, 0.5f));
+        if (ImGui::BeginPopupModal("About OdysseyEngine", &impl_->show_about_dialog,
+                                   ImGuiWindowFlags_AlwaysAutoResize)) {
+            ImGui::TextWrapped("OdysseyEngine Editor\n\n"
+                             "Version: dev (Phase 8)\n"
+                             "Build Date: %s\n"
+                             "Git Hash: (unavailable in Batch H)\n\n"
+                             "Licensed under MIT",
+                             __DATE__);
+            ImGui::Spacing();
+            if (ImGui::Button("OK", ImVec2(120, 0))) {
+                impl_->show_about_dialog = false;
+                ImGui::CloseCurrentPopup();
+            }
+            ImGui::EndPopup();
+        }
+    }
+
+    // Batch H: First-run welcome wizard
+    if (impl_->first_run_wizard_pending) {
+        ImVec2 center = ImGui::GetMainViewport()->GetCenter();
+        ImGui::SetNextWindowPos(center, ImGuiCond_Appearing, ImVec2(0.5f, 0.5f));
+        ImGui::SetNextWindowSize(ImVec2(500, 350), ImGuiCond_FirstUseEver);
+
+        if (ImGui::BeginPopupModal("Welcome to OdysseyEngine", nullptr,
+                                   ImGuiWindowFlags_AlwaysAutoResize)) {
+            if (impl_->wizard_page == 0) {
+                ImGui::TextWrapped("Welcome to OdysseyEngine Editor!\n\n"
+                                 "This is a powerful tool for crafting 3D game worlds\n"
+                                 "with GPU-driven AI behavior authoring.\n\n"
+                                 "Let's get you started.");
+                ImGui::Spacing();
+                ImGui::Spacing();
+                if (ImGui::Button("Next >>", ImVec2(120, 0))) {
+                    impl_->wizard_page = 1;
+                }
+            } else if (impl_->wizard_page == 1) {
+                ImGui::TextWrapped("Editor Panels:\n\n"
+                                 "• Hierarchy: Left — organize your scene entities\n"
+                                 "• Inspector: Right — edit entity properties\n"
+                                 "• Viewport: Center — 3D view of your scene\n"
+                                 "• Asset Browser: Bottom — browse meshes, materials, etc.\n"
+                                 "• Log: Bottom — engine messages & debug output");
+                ImGui::Spacing();
+                if (ImGui::Button("<< Back", ImVec2(100, 0))) {
+                    impl_->wizard_page = 0;
+                }
+                ImGui::SameLine();
+                if (ImGui::Button("Next >>", ImVec2(100, 0))) {
+                    impl_->wizard_page = 2;
+                }
+            } else if (impl_->wizard_page == 2) {
+                ImGui::TextWrapped("Quick Tips:\n\n"
+                                 "• Press F to frame the selected entity\n"
+                                 "• W/E/R to switch Move/Rotate/Scale tools\n"
+                                 "• Ctrl+P for the command palette\n"
+                                 "• F11 to toggle fullscreen\n\n"
+                                 "Ready to create?");
+                ImGui::Spacing();
+                if (ImGui::Button("<< Back", ImVec2(100, 0))) {
+                    impl_->wizard_page = 1;
+                }
+                ImGui::SameLine();
+                if (ImGui::Button("Let's Go!", ImVec2(100, 0))) {
+                    impl_->first_run_wizard_pending = false;
+                    ImGui::CloseCurrentPopup();
+                }
+            }
+            ImGui::EndPopup();
+        }
     }
 
     ImGui::Render();
@@ -874,25 +1679,32 @@ void Editor::draw_frame(float delta_time) {
     // FRAGMENT_SHADER_BIT), so ImGui can sample the image safely when the
     // main render pass begins below — no manual pipeline barrier required.
     if (impl_->has_viewport_renderer) {
-        // Advance camera orbit time only while in Play/Simulate modes so
-        // Edit mode feels like a paused scene.
-        if (state_.mode == Mode::Play || state_.mode == Mode::Simulate) {
-            impl_->camera_orbit_time += delta_time;
-        }
-
-        // Build an orbit VP matrix. The liminal mood wants a slow arc —
-        // orbit at radius 60, height 25, 0.05 rad/s.
-        const float r = 60.0f;
-        const float a = impl_->camera_orbit_time * 0.05f;
-        glm::vec3 eye(std::cos(a) * r, 25.0f, std::sin(a) * r);
-        glm::vec3 at(0.0f, 1.0f, 0.0f);
-        glm::vec3 up(0.0f, 1.0f, 0.0f);
-        glm::mat4 view = glm::lookAt(eye, at, up);
+        // Batch D: Use free-fly camera in Edit mode; auto-orbit in Play/Simulate.
+        glm::mat4 view;
+        glm::mat4 proj;
         auto ext = impl_->viewport_renderer.extent();
         float aspect = (ext.height > 0)
             ? (static_cast<float>(ext.width) / static_cast<float>(ext.height))
             : 1.0f;
-        glm::mat4 proj = glm::perspective(glm::radians(55.0f), aspect, 0.5f, 500.0f);
+
+        if (state_.mode == Mode::Edit) {
+            // Free-fly camera for editor.
+            view = state_.viewport_camera.view_matrix();
+            proj = state_.viewport_camera.projection_matrix(aspect);
+        } else {
+            // Auto-orbit for Play/Simulate modes.
+            if (state_.mode == Mode::Play || state_.mode == Mode::Simulate) {
+                impl_->camera_orbit_time += delta_time;
+            }
+            const float r = 60.0f;
+            const float a = impl_->camera_orbit_time * 0.05f;
+            glm::vec3 eye(std::cos(a) * r, 25.0f, std::sin(a) * r);
+            glm::vec3 at(0.0f, 1.0f, 0.0f);
+            glm::vec3 up(0.0f, 1.0f, 0.0f);
+            view = glm::lookAt(eye, at, up);
+            proj = glm::perspective(glm::radians(55.0f), aspect, 0.5f, 500.0f);
+        }
+
         proj[1][1] *= -1.0f; // flip Y for Vulkan's clip space
         glm::mat4 vp = proj * view;
 
@@ -991,6 +1803,14 @@ void Editor::draw_frame(float delta_time) {
 
 void Editor::shutdown() {
     if (!impl_) return;
+
+    // Batch B: Save editor preferences before tearing down
+    auto save_r = save_editor_prefs(impl_->exe_dir, impl_->editor_prefs);
+    if (save_r.is_err()) {
+        spdlog::warn("[editor] failed to save editor prefs on shutdown: {}",
+                     save_r.error());
+    }
+
     if (impl_->device != VK_NULL_HANDLE) {
         vkDeviceWaitIdle(impl_->device);
     }

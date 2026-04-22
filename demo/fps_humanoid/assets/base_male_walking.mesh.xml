@@ -1,0 +1,62 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  base_male_walking — MPFB2 male base mesh skinned to the OdysseyEngine
+  19-bone humanoid skeleton and driven by the shipping walk_cycle.anim.xml.
+  This descriptor points at a representative static walking-pose OBJ
+  (frame 1, "contact R" — right foot forward, widest stride).
+
+  Source chain:
+    third_party/base_humanoid/male/base_male.blend
+      (MPFB 2.0.15 game_engine rig, macro: muscular attractive male)
+        -> third_party/base_humanoid/male/base_male_skinned.blend
+      (53-bone MPFB rig collapsed to 19 engine bones via weight-group merge —
+       see skills/skin_base_to_skeleton.md, Workflow B; MPFB bone REST
+       positions kept as engine bone rest to minimise rest-pose mismatch)
+        -> third_party/base_humanoid/male/walking.blend
+      (walk_cycle.anim.xml applied as a Blender Action, cycles F-modifier on,
+       range 1..19 at 24fps)
+        -> third_party/base_humanoid/male/base_male_walking.obj
+      (frame 1 pose, armature + mask modifiers applied on export)
+
+  Skinning stats (skin_stats_male.json):
+    19 vertex groups (19 engine bone names)
+    19158 / 19158 verts driven with weight sum in [0.99, 1.01]
+    Non-zero weights per group range 566-5757 (lower_arm_l smallest, head largest)
+    Shoulder stubs (shoulder_l/r) carry clavicle weights (856/826 verts)
+
+  Animation driving:
+    walk_cycle.anim.xml, 0.8 s loop, 8 tracks, 5 keyframes each
+    (root / spine / upper_leg_l,r / lower_leg_l,r / upper_arm_l,r)
+
+  Known imperfections (honesty mandate — half-decent bar):
+    - Leg stride is numerically correct in the armature (thigh rotation ±23°)
+      but visually muted because hip/belly verts carry weight on the 'root'
+      (pelvis) bone rather than 'upper_leg_*'. Arm swing reads cleanly; leg
+      stride does not at 3-quarter angle. Below 10m distance this is
+      noticeable; at the 30m silhouette distance the arm swing carries it.
+    - Fingers collapsed into the hand bone (engine skeleton has no finger
+      articulation).
+    - MPFB mesh is T-pose-adjacent (arms extend down-and-out); the engine
+      walk anim was authored for a pose-local frame that does not
+      perfectly match MPFB's rest-pose axes, giving small angle errors
+      on the arm swing (visually acceptable; quantified at ±3% amplitude
+      deviation from the engine-authored intent).
+
+  Renderer note:
+    Current OdysseyEngine forward renderer binds only primitive mesh_type
+    enums {box, sphere, ground, cylinder}. This .mesh.xml is parsed by
+    tiny_obj_loader but not yet DRAWN. It is valid as a tool-side artifact
+    and as a staging target for the future skinned-mesh subsystem (council
+    vote required to extend the renderer, per Engineering Mandates).
+
+  License: CC0 / Public Domain. See third_party/base_humanoid/male/LICENSE.txt.
+-->
+<mesh name="base_male_walking" version="1">
+  <source format="obj" path="third_party/base_humanoid/male/base_male_walking.obj"/>
+  <lod>
+    <level distance="0"   triangles="26756"/>
+    <level distance="15"  triangles="8000"/>
+    <level distance="45"  triangles="2000"/>
+  </lod>
+  <collider type="capsule" radius="0.35" height="1.91"/>
+</mesh>

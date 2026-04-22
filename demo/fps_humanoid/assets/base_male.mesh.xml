@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  base_male — MPFB2-generated muscular attractive male base mesh, normalized
+  to the OdysseyEngine 19-bone humanoid skeleton conventions (height 1.91 m,
+  feet planted at Y=0).
+
+  Source: third_party/base_humanoid/male/base_male.obj
+          produced by demo/showcase/assets/base_humanoid/scripts/generate_base_male.py
+          + scale_to_engine_skeleton.py (see that directory's BUILD_LOG.md)
+  Generator: MPFB 2.0.15 build 20260421 in Blender 4.2.20 LTS.
+  Rig (authoring): MPFB "game_engine" standard rig (53 bones). The engine
+    skeleton is 19 bones — retarget/skin mapping lives in the future skill
+    skin_base_to_skeleton.md (Step 2 of the humanoid pipeline).
+
+  Geometry stats:
+    verts = 19158   polys = 18486 (100% quads, 0 tris, 0 n-gons)
+    OBJ face entries = 13378 (some edge-sharing coalesced; triangulates to
+    ~26756 tris on engine load via tiny_obj_loader)
+    height = 1.912 m   feet at Z=0.0
+
+  License: CC0 / Public Domain. MPFB2 is GPL-3.0-or-later but the generated
+  mesh output carries no copyright (base topology is MakeHuman CC0, weight
+  maps and targets are CC0). See LICENSE.txt in the asset directory.
+
+  Renderer note: current OdysseyEngine forward renderer only binds primitive
+  mesh_type enums {box,sphere,ground,cylinder}. This .mesh.xml targets the
+  tinyobj OBJ-source path that is parsed but not yet drawn. Skinned-mesh
+  rendering is a future council-gated subsystem (see Engineering Mandates).
+  Present-day use: external tool validation, engine round-trip testing,
+  and staging for the skinned-mesh renderer when it lands.
+-->
+<mesh name="base_male" version="1">
+  <source format="obj" path="third_party/base_humanoid/male/base_male.obj"/>
+  <lod>
+    <level distance="0"   triangles="26756"/>
+    <level distance="15"  triangles="8000"/>
+    <level distance="45"  triangles="2000"/>
+  </lod>
+  <collider type="capsule" radius="0.35" height="1.91"/>
+</mesh>

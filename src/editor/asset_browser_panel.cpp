@@ -1,8 +1,12 @@
 #include "editor/asset_browser_panel.h"
 #include "editor/editor.h"
 #include "editor/mode_enum.h"
+#include "editor/asset_import.h"
 
 #include <imgui.h>
+
+#define NOMINMAX
+#include <windows.h>
 
 #include <spdlog/spdlog.h>
 
@@ -127,6 +131,17 @@ void sort_assets_canonical(std::vector<AssetEntry>& entries) {
         });
 }
 
+std::vector<AssetEntry> filter_by_type(
+    const std::vector<AssetEntry>& entries, AssetType type) {
+    std::vector<AssetEntry> out;
+    for (const auto& entry : entries) {
+        if (entry.type == type) {
+            out.push_back(entry);
+        }
+    }
+    return out;
+}
+
 std::vector<AssetEntry> enumerate_project(const std::filesystem::path& root) {
     std::vector<AssetEntry> out;
     std::error_code ec;
@@ -207,11 +222,43 @@ void AssetBrowserPanel::draw(EditorState& state) {
         refresh(state.project_root);
     }
 
-    // Header row: root path + Refresh button.
-    ImGui::TextDisabled("Root: %s", state.project_root.generic_string().c_str());
+    // Header row: root path + Refresh button + Import button.
+    ImGui::TextUnformatted(("Root: " + state.project_root.string()).c_str());
+    if (entries_.empty()) {
+        ImGui::TextColored(ImVec4(0.9f, 0.3f, 0.3f, 1.0f),
+                           "0 assets — is the path correct?");
+    }
     ImGui::SameLine();
     if (ImGui::SmallButton("Refresh")) {
         refresh(state.project_root);
+    }
+    ImGui::SameLine();
+    if (ImGui::SmallButton("Import...")) {
+        OPENFILENAMEA ofn{};
+        char filename[MAX_PATH]{};
+        filename[0] = '\0';
+
+        ofn.lStructSize = sizeof(ofn);
+        // Note: hwndOwner would be glfwGetWin32Window, but we don't have access
+        // to the window in this panel. ImGui window will suffice.
+        ofn.lpstrFilter = "All Files\0*.*\0OBJ Files\0*.obj\0PNG Files\0*.png\0"
+                          "JPEG Files\0*.jpg;*.jpeg\0WAV Files\0*.wav\0"
+                          "GLB Files\0*.glb\0FBX Files\0*.fbx\0XML Files\0*.xml\0\0";
+        ofn.nFilterIndex = 1;
+        ofn.lpstrFile = filename;
+        ofn.nMaxFile = sizeof(filename);
+        ofn.Flags = OFN_PATHMUSTEXIST | OFN_FILEMUSTEXIST;
+
+        if (GetOpenFileNameA(&ofn)) {
+            ImportSource source{std::filesystem::path(filename)};
+            auto result = execute_import(source, state.project_root, false);
+            if (result.is_ok()) {
+                spdlog::info("[editor] asset imported: {}", filename);
+                refresh(state.project_root);  // Refresh the browser
+            } else {
+                spdlog::error("[editor] import failed: {}", result.error());
+            }
+        }
     }
     ImGui::TextDisabled("%zu assets", entries_.size());
     ImGui::Separator();
@@ -251,6 +298,27 @@ void AssetBrowserPanel::draw(EditorState& state) {
         if (ImGui::Selectable(rel_s.c_str(), is_selected, sflags)) {
             state.selected_asset = e.path;
         }
+
+        // F26: Drag-drop source for assets onto Inspector slots
+        if (ImGui::BeginDragDropSource(ImGuiDragDropFlags_None)) {
+            const char* payload_type = nullptr;
+            switch (e.type) {
+            case AssetType::Mesh:     payload_type = "ASSET_MESH"; break;
+            case AssetType::Material: payload_type = "ASSET_MATERIAL"; break;
+            case AssetType::Behavior: payload_type = "ASSET_BEHAVIOR"; break;
+            case AssetType::Prefab:   payload_type = "ASSET_PREFAB"; break;
+            default: break;
+            }
+
+            if (payload_type) {
+                const std::string& path_str = e.path.generic_string();
+                ImGui::SetDragDropPayload(payload_type, path_str.c_str(),
+                                         path_str.size() + 1);
+            }
+            ImGui::TextUnformatted(rel_s.c_str());
+            ImGui::EndDragDropSource();
+        }
+
         if (ImGui::IsItemHovered() && ImGui::IsMouseDoubleClicked(0)) {
             // Scene double-click → request scene swap (gated on Edit).
             if (e.type == AssetType::Scene) {

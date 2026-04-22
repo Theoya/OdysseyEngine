@@ -20,12 +20,14 @@
 
 #include "core/result.h"
 #include "editor/mode_enum.h"
+#include "editor/scene_camera.h"
 #include "scene/entity_manager.h"
 
 #include <filesystem>
 #include <memory>
 #include <string>
 #include <vector>
+#include <unordered_set>
 
 struct GLFWwindow;
 
@@ -34,11 +36,27 @@ namespace odyssey::editor {
 class Panel;
 class SceneViewportRenderer;
 
+// Batch D: Gizmo operation modes (Q/W/E/R hotkeys).
+enum class GizmoMode {
+    Select,     // No gizmo displayed
+    Translate,  // Move entity (default)
+    Rotate,     // Rotate entity
+    Scale,      // Scale entity
+    Universal   // Combined transform
+};
+
+// Batch D: Gizmo coordinate space.
+enum class GizmoSpace {
+    Local,  // Entity-relative
+    World   // Global axes
+};
+
 // Editor state — the single pure-data struct passed to every Panel::draw.
 // Anything that's worth saving to an editor-layout file lives here.
 struct EditorState {
     // Selection
     EntityID selected_entity = INVALID_ENTITY;
+    std::unordered_set<EntityID> multi_selected;  // Batch B: multi-select via Ctrl/Shift
 
     // Execution mode
     Mode mode = Mode::Edit;
@@ -50,6 +68,9 @@ struct EditorState {
     // Coarse dirty flag (set when mode changes or selection changes —
     // used by future Phase 2 persistence hooks).
     bool dirty = false;
+
+    // Scene dirty indicator: reflects SceneData::mutated (Batch B).
+    bool scene_dirty = false;
 
     // Status-bar text (last log line, load result, etc.)
     std::string status_line;
@@ -100,6 +121,29 @@ struct EditorState {
     // into the matching `scene_data.entities[i].*` so the reconstruction
     // path sees the mutation.
     void* scene_data = nullptr;  // SceneData*, void* to avoid a header cycle
+
+    // --- Batch D: Free-fly camera (Edit mode) ---
+    SceneCamera viewport_camera;
+    GizmoMode gizmo_mode = GizmoMode::Translate;
+    GizmoSpace gizmo_space = GizmoSpace::World;
+
+    // Batch D: Snap settings (persist via editor_prefs.xml).
+    float snap_position = 0.25f;   // meters
+    float snap_rotation = 15.0f;   // degrees
+    float snap_scale = 0.1f;       // scale units
+    bool snap_enabled = false;
+
+    // Batch D: Grid overlay visibility toggle.
+    bool show_grid = true;
+
+    // --- Batch F: Play mode ---
+    // True when in Play or Simulate mode but paused (dt=0 in the engine tick).
+    // Toggled by the Pause button; Step button advances one frame when true.
+    bool play_paused = false;
+
+    // True when Play button was pressed to capture a snapshot.
+    // Used to fire the snapshot capture once per mode transition.
+    bool play_snapshot_requested = false;
 };
 
 // Pure helper: given an entity pointer, produce a stable display label.
@@ -138,6 +182,10 @@ private:
 
     std::vector<std::unique_ptr<Panel>> panels_;
     EditorState state_;
+
+    // Batch G: Track frame times for FPS calculation.
+    float fps_ema_ = 60.0f;
+    float last_delta_time_ = 1.0f / 60.0f;
 
     void build_panels();
     void draw_frame(float delta_time);

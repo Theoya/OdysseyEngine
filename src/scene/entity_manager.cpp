@@ -94,6 +94,32 @@ void EntityManager::clear() {
     spdlog::debug("EntityManager cleared");
 }
 
+void EntityManager::restore_entities(
+    const std::unordered_map<EntityID, Entity>& snapshot_entities) {
+    clear();
+    entities_ = snapshot_entities;
+
+    // Rebuild archetype groups from the restored entities
+    for (const auto& [id, entity] : entities_) {
+        (void)id;  // Entity ID is already in the entity struct
+        auto& group = get_or_create_archetype(entity.archetype);
+        group.entity_ids.push_back(entity.id);
+        // Preserve the behavior_shader from the entity if set
+        if (!entity.components.behavior_shader.empty() && group.behavior_shader.empty()) {
+            group.behavior_shader = entity.components.behavior_shader;
+        }
+    }
+
+    // Update next_id_ to be greater than any existing entity ID
+    for (const auto& [id, entity] : entities_) {
+        if (id >= next_id_) {
+            next_id_ = id + 1;
+        }
+    }
+
+    spdlog::debug("[entity_manager] restored {} entities", entities_.size());
+}
+
 ArchetypeGroup& EntityManager::get_or_create_archetype(const std::string& archetype) {
     auto it = archetype_index_.find(archetype);
     if (it != archetype_index_.end()) {

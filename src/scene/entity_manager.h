@@ -82,6 +82,12 @@ public:
     // Clear everything
     void clear();
 
+    // Restore entities from a snapshot (used by play-in-editor snapshot restore).
+    // Clears the current entity set and replaces it with the snapshot.
+    // Rebuilds archetype groups and indexes from the restored entities.
+    // Pure in semantics; side-effect on em_out's internal state.
+    void restore_entities(const std::unordered_map<EntityID, Entity>& snapshot_entities);
+
 private:
     std::unordered_map<EntityID, Entity> entities_;
     std::vector<ArchetypeGroup> archetype_groups_;

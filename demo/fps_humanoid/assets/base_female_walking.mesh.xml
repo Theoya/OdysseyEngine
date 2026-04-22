@@ -1,0 +1,45 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  base_female_walking — MPFB2 female base mesh skinned to the OdysseyEngine
+  19-bone humanoid skeleton and driven by the shipping walk_cycle.anim.xml.
+  This descriptor points at a representative static walking-pose OBJ
+  (frame 1, "contact R" — right foot forward, widest stride).
+
+  Source chain:
+    third_party/base_humanoid/female/base_female.blend
+      (MPFB 2.0.15 game_engine_with_breast rig, macro: shapely attractive female)
+        -> third_party/base_humanoid/female/base_female_skinned.blend
+      (55-bone MPFB rig collapsed to 19 engine bones via weight-group merge —
+       see skills/skin_base_to_skeleton.md, Workflow B; breast bones ignored
+       and their verts merged into chest. MPFB bone REST positions kept as
+       engine bone rest to minimise rest-pose mismatch)
+        -> third_party/base_humanoid/female/walking.blend
+      (walk_cycle.anim.xml applied as a Blender Action, cycles F-modifier on,
+       range 1..19 at 24fps)
+        -> third_party/base_humanoid/female/base_female_walking.obj
+      (frame 1 pose, armature + mask modifiers applied on export)
+
+  Skinning stats (skin_stats_female.json):
+    19 vertex groups (19 engine bone names; breast_l/r MPFB groups merged to chest)
+    19158 / 19158 verts driven with weight sum in [0.99, 1.01]
+    Non-zero weights per group range 566-5757 (lower_arm_l smallest, head largest)
+
+  Animation driving:
+    walk_cycle.anim.xml, 0.8 s loop, 8 tracks, 5 keyframes each.
+
+  Known imperfections — same class as the male variant; see
+  base_male_walking.mesh.xml header. Additionally:
+    - Breast motion is stiff (rigidly rigged to chest). A follow-through jiggle
+      would need a dedicated breast bone chain with spring dynamics.
+
+  License: CC0 / Public Domain. See third_party/base_humanoid/female/LICENSE.txt.
+-->
+<mesh name="base_female_walking" version="1">
+  <source format="obj" path="third_party/base_humanoid/female/base_female_walking.obj"/>
+  <lod>
+    <level distance="0"   triangles="26756"/>
+    <level distance="15"  triangles="8000"/>
+    <level distance="45"  triangles="2000"/>
+  </lod>
+  <collider type="capsule" radius="0.33" height="1.91"/>
+</mesh>

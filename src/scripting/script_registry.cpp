@@ -29,4 +29,14 @@ void register_builtin_scripts(ScriptRunner& runner) {
     }
 }
 
+std::vector<std::string> list_registered_script_classes() {
+    const auto& factories = detail::get_registered_factories();
+    std::vector<std::string> names;
+    for (const auto& [name, factory] : factories) {
+        (void)factory;  // unused in this context
+        names.push_back(name);
+    }
+    return names;
+}
+
 } // namespace odyssey::scripting
