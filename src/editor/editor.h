@@ -26,6 +26,7 @@
 #include <memory>
 #include <string>
 #include <vector>
+#include <unordered_set>
 
 struct GLFWwindow;
 
@@ -39,6 +40,7 @@ class SceneViewportRenderer;
 struct EditorState {
     // Selection
     EntityID selected_entity = INVALID_ENTITY;
+    std::unordered_set<EntityID> multi_selected;  // Batch B: multi-select via Ctrl/Shift
 
     // Execution mode
     Mode mode = Mode::Edit;
@@ -50,6 +52,9 @@ struct EditorState {
     // Coarse dirty flag (set when mode changes or selection changes —
     // used by future Phase 2 persistence hooks).
     bool dirty = false;
+
+    // Scene dirty indicator: reflects SceneData::mutated (Batch B).
+    bool scene_dirty = false;
 
     // Status-bar text (last log line, load result, etc.)
     std::string status_line;

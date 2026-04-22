@@ -7,8 +7,10 @@
 // ---------------------------------------------------------------------------
 
 #include "editor/panel.h"
+#include "core/types.h"
 
 #include <string>
+#include <unordered_map>
 
 namespace odyssey::editor {
 
@@ -24,6 +26,13 @@ private:
 
     // Simple search-filter string (applied live as the user types).
     std::string filter_;
+
+    // Batch B: track expand/collapse state per archetype (for expand-all/collapse-all)
+    std::unordered_map<std::string, bool> archetype_expanded_;
+
+    // Batch B: rename-in-progress tracking
+    EntityID rename_in_progress_ = INVALID_ENTITY;
+    std::string rename_buffer_;
 };
 
 } // namespace odyssey::editor
