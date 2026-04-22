@@ -1,8 +1,15 @@
 #include <gtest/gtest.h>
 #include "editor/entity_clipboard.h"
 #include "scene/entity_manager.h"
+#include "core/types.h"
+#include <glm/glm.hpp>
 
 using namespace odyssey::editor;
+using odyssey::EntityID;
+using odyssey::scene::Entity;
+
+// Bring Entity into the test scope so `scene::Entity` (fully qualified) also resolves.
+namespace scene = odyssey::scene;
 
 TEST(EntityClipboard, GlobalSingleton) {
     // Clipboard should be accessible and persistent
