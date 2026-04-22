@@ -121,3 +121,17 @@ The following conditions from the "Additions adopted" list could not be fully sa
 **Gap:** Hot-reload requires a file-watcher loop (ReadDirectoryChangesW) and a live engine running WASAPI audio simultaneously. This is an integration test requiring the full engine runtime, not a unit test. The upload-stall bound is enforced architecturally (staging + fence per texture, no unbounded allocation), but the timing assertion against the 10ms audio-buffer boundary cannot be tested in a headless unit test.
 
 **Status:** The architecture satisfies Marty's stall condition by design. The timing regression test is deferred.
+
+---
+
+## Acceptance deferred (2026-04-21, post-smoke-test)
+
+Lighting-mood-architect was consulted as the council-ratified acceptance gate after the smoke test (see `odyssey_shooter.exe --scene demo/showcase/showcase.scene.xml` clean launch, commit `7bbe841`). Verdict: **CONDITIONAL-APPROVE**. Visual parity is preserved by construction — PostProcessor is untouched, the Phase-5 lighting profile runtime and CRTParams overlay are unchanged, the post-FX stack order is preserved, and the showcase scene has effectively zero authored-texture surface area today. A clean runtime with no validation errors is necessary, not sufficient.
+
+**The ΔE<1.0 golden-image gate is WAIVED only while all three preconditions hold simultaneously:**
+
+1. PostProcessor stays isolated (its own descriptor sets; CRT + EVA HUD untouched by any future phase).
+2. Authored-texture count stays near zero (the showcase has not yet accumulated many-material authored assets).
+3. No lighting-subsystem expansion ships (specifically: no Kelvin palette, no volumetrics, no 3D LUT grade textures, no shadow atlas, no directional_override landing in `src/vulkan/` or `src/assets/`).
+
+**The moment any of those three change, the golden-image harness MUST be green before the change merges.** The harness is tracked as a follow-on at `docs/decisions/2026-04-21-bindless-golden-image-harness.md` — same trigger as lighting-mood-architect's original Phase-5 follow-on condition.
