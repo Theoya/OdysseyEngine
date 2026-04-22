@@ -1,8 +1,12 @@
 #include "editor/asset_browser_panel.h"
 #include "editor/editor.h"
 #include "editor/mode_enum.h"
+#include "editor/asset_import.h"
 
 #include <imgui.h>
+
+#define NOMINMAX
+#include <windows.h>
 
 #include <spdlog/spdlog.h>
 
@@ -218,7 +222,7 @@ void AssetBrowserPanel::draw(EditorState& state) {
         refresh(state.project_root);
     }
 
-    // Header row: root path + Refresh button.
+    // Header row: root path + Refresh button + Import button.
     ImGui::TextUnformatted(("Root: " + state.project_root.string()).c_str());
     if (entries_.empty()) {
         ImGui::TextColored(ImVec4(0.9f, 0.3f, 0.3f, 1.0f),
@@ -227,6 +231,34 @@ void AssetBrowserPanel::draw(EditorState& state) {
     ImGui::SameLine();
     if (ImGui::SmallButton("Refresh")) {
         refresh(state.project_root);
+    }
+    ImGui::SameLine();
+    if (ImGui::SmallButton("Import...")) {
+        OPENFILENAMEA ofn{};
+        char filename[MAX_PATH]{};
+        filename[0] = '\0';
+
+        ofn.lStructSize = sizeof(ofn);
+        // Note: hwndOwner would be glfwGetWin32Window, but we don't have access
+        // to the window in this panel. ImGui window will suffice.
+        ofn.lpstrFilter = "All Files\0*.*\0OBJ Files\0*.obj\0PNG Files\0*.png\0"
+                          "JPEG Files\0*.jpg;*.jpeg\0WAV Files\0*.wav\0"
+                          "GLB Files\0*.glb\0FBX Files\0*.fbx\0XML Files\0*.xml\0\0";
+        ofn.nFilterIndex = 1;
+        ofn.lpstrFile = filename;
+        ofn.nMaxFile = sizeof(filename);
+        ofn.Flags = OFN_PATHMUSTEXIST | OFN_FILEMUSTEXIST;
+
+        if (GetOpenFileNameA(&ofn)) {
+            ImportSource source{std::filesystem::path(filename)};
+            auto result = execute_import(source, state.project_root, false);
+            if (result.is_ok()) {
+                spdlog::info("[editor] asset imported: {}", filename);
+                refresh(state.project_root);  // Refresh the browser
+            } else {
+                spdlog::error("[editor] import failed: {}", result.error());
+            }
+        }
     }
     ImGui::TextDisabled("%zu assets", entries_.size());
     ImGui::Separator();

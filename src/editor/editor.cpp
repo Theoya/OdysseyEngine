@@ -17,6 +17,7 @@
 #include "editor/preferences_panel.h"
 #include "editor/status_bar.h"
 #include "editor/command_palette.h"
+#include "editor/asset_import.h"
 
 #include "scene/scene_loader.h"
 #include "scene/scene_serializer.h"
@@ -622,6 +623,29 @@ Result<bool> Editor::initialize(const std::filesystem::path& scene_path) {
             if (self && self->impl_) self->impl_->framebuffer_resized = true;
         });
 
+    // Drop callback for drag-drop asset import
+    glfwSetDropCallback(impl_->window,
+        [](GLFWwindow* w, int count, const char** paths) {
+            auto* self = static_cast<Editor*>(glfwGetWindowUserPointer(w));
+            if (!self || !self->impl_ || count <= 0) return;
+
+            for (int i = 0; i < count; ++i) {
+                ImportSource source{std::filesystem::path(paths[i])};
+                auto result = execute_import(source, self->state_.project_root, false);
+                if (result.is_ok()) {
+                    spdlog::info("[editor] dropped asset imported: {}", paths[i]);
+                    // Trigger asset browser refresh on success
+                    for (auto& panel : self->panels_) {
+                        if (auto* browser = dynamic_cast<AssetBrowserPanel*>(panel.get())) {
+                            browser->refresh(self->state_.project_root);
+                        }
+                    }
+                } else {
+                    spdlog::warn("[editor] drop import failed: {}", result.error());
+                }
+            }
+        });
+
     // -------- Vulkan --------
     if (!create_vk_instance(*impl_))   return Result<bool>::err("Vulkan instance creation failed");
     if (!pick_physical_device(*impl_)) return Result<bool>::err("No Vulkan physical device");
@@ -931,6 +955,44 @@ void Editor::draw_menu_bar() {
                 auto path = open_scene_dialog();
                 if (path) {
                     state_.scene_swap_request = path.value();
+                }
+            }
+        }
+
+        ImGui::Separator();
+
+        // --- Import Asset ---
+        if (ImGui::MenuItem("Import Asset...", nullptr)) {
+            // Win32 dialog to open any file type.
+            OPENFILENAMEA ofn{};
+            char filename[MAX_PATH]{};
+            filename[0] = '\0';
+
+            ofn.lStructSize = sizeof(ofn);
+            ofn.hwndOwner = nullptr;  // GLFW doesn't expose Win32 HWND; dialog will appear independently
+            ofn.lpstrFilter = "All Files\0*.*\0OBJ Files\0*.obj\0PNG Files\0*.png\0"
+                              "JPEG Files\0*.jpg;*.jpeg\0WAV Files\0*.wav\0"
+                              "GLB Files\0*.glb\0FBX Files\0*.fbx\0XML Files\0*.xml\0\0";
+            ofn.nFilterIndex = 1;
+            ofn.lpstrFile = filename;
+            ofn.nMaxFile = sizeof(filename);
+            ofn.Flags = OFN_PATHMUSTEXIST | OFN_FILEMUSTEXIST;
+
+            if (GetOpenFileNameA(&ofn)) {
+                ImportSource source{std::filesystem::path(filename)};
+                auto result = execute_import(source, state_.project_root, false);
+                if (result.is_ok()) {
+                    spdlog::info("[editor] asset imported: {}", filename);
+                    state_.status_line = "Imported " + std::filesystem::path(filename).filename().string();
+                    // Refresh asset browser
+                    for (auto& panel : panels_) {
+                        if (auto* browser = dynamic_cast<AssetBrowserPanel*>(panel.get())) {
+                            browser->refresh(state_.project_root);
+                        }
+                    }
+                } else {
+                    spdlog::error("[editor] import failed: {}", result.error());
+                    state_.status_line = "Import failed: " + result.error();
                 }
             }
         }
