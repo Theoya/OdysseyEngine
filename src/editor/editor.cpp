@@ -1075,6 +1075,56 @@ void Editor::draw_frame(float delta_time) {
 
     draw_menu_bar();
 
+    // ---- Batch D: Update free-fly scene camera (Edit mode only) ----
+    if (state_.mode == Mode::Edit && impl_->has_viewport_renderer) {
+        ImGuiIO& io = ImGui::GetIO();
+
+        // Build input for scene camera.
+        SceneCameraInput cam_input{};
+        cam_input.move_forward = ImGui::IsKeyDown(ImGuiKey_W);
+        cam_input.move_backward = ImGui::IsKeyDown(ImGuiKey_S);
+        cam_input.move_left = ImGui::IsKeyDown(ImGuiKey_A);
+        cam_input.move_right = ImGui::IsKeyDown(ImGuiKey_D);
+        cam_input.move_up = ImGui::IsKeyDown(ImGuiKey_E) && !ImGui::IsKeyDown(ImGuiKey_LeftCtrl);
+        cam_input.move_down = ImGui::IsKeyDown(ImGuiKey_Q) && !ImGui::IsKeyDown(ImGuiKey_LeftCtrl);
+        cam_input.right_button_held = ImGui::IsMouseDown(ImGuiMouseButton_Right);
+        cam_input.mouse_dx = io.MouseDelta.x;
+        cam_input.mouse_dy = io.MouseDelta.y;
+        cam_input.shift_held = io.KeyShift;
+        cam_input.scroll_delta = io.MouseWheel;
+
+        // Update camera state.
+        state_.viewport_camera = update_scene_camera(state_.viewport_camera, cam_input, delta_time);
+
+        // Batch D: Hotkeys for gizmo mode (only when viewport has focus).
+        // Q → Select, W → Translate, E → Rotate, R → Scale, T → Universal.
+        // Only respond when not typing in a text field.
+        if (!io.WantCaptureKeyboard) {
+            if (ImGui::IsKeyPressed(ImGuiKey_Q, false)) state_.gizmo_mode = GizmoMode::Select;
+            if (ImGui::IsKeyPressed(ImGuiKey_W, false)) state_.gizmo_mode = GizmoMode::Translate;
+            if (ImGui::IsKeyPressed(ImGuiKey_E, false)) state_.gizmo_mode = GizmoMode::Rotate;
+            if (ImGui::IsKeyPressed(ImGuiKey_R, false)) state_.gizmo_mode = GizmoMode::Scale;
+            if (ImGui::IsKeyPressed(ImGuiKey_T, false)) state_.gizmo_mode = GizmoMode::Universal;
+
+            // X → toggle Local/World space.
+            if (ImGui::IsKeyPressed(ImGuiKey_X, false)) {
+                state_.gizmo_space = (state_.gizmo_space == GizmoSpace::Local)
+                    ? GizmoSpace::World : GizmoSpace::Local;
+            }
+
+            // F → frame selected entity.
+            if (ImGui::IsKeyPressed(ImGuiKey_F, false) && state_.selected_entity != INVALID_ENTITY) {
+                if (const auto* entity = state_.entities->get_entity(state_.selected_entity)) {
+                    float radius = 1.0f;  // Default; MeshCollider support is Batch J.
+                    auto target = compute_frame_target(entity->components.transform.position, radius);
+                    state_.viewport_camera.position = target.position;
+                    state_.viewport_camera.yaw = target.yaw;
+                    state_.viewport_camera.pitch = target.pitch;
+                }
+            }
+        }
+    }
+
     for (auto& p : panels_) {
         p->draw(state_);
     }
@@ -1099,25 +1149,32 @@ void Editor::draw_frame(float delta_time) {
     // FRAGMENT_SHADER_BIT), so ImGui can sample the image safely when the
     // main render pass begins below — no manual pipeline barrier required.
     if (impl_->has_viewport_renderer) {
-        // Advance camera orbit time only while in Play/Simulate modes so
-        // Edit mode feels like a paused scene.
-        if (state_.mode == Mode::Play || state_.mode == Mode::Simulate) {
-            impl_->camera_orbit_time += delta_time;
-        }
-
-        // Build an orbit VP matrix. The liminal mood wants a slow arc —
-        // orbit at radius 60, height 25, 0.05 rad/s.
-        const float r = 60.0f;
-        const float a = impl_->camera_orbit_time * 0.05f;
-        glm::vec3 eye(std::cos(a) * r, 25.0f, std::sin(a) * r);
-        glm::vec3 at(0.0f, 1.0f, 0.0f);
-        glm::vec3 up(0.0f, 1.0f, 0.0f);
-        glm::mat4 view = glm::lookAt(eye, at, up);
+        // Batch D: Use free-fly camera in Edit mode; auto-orbit in Play/Simulate.
+        glm::mat4 view;
+        glm::mat4 proj;
         auto ext = impl_->viewport_renderer.extent();
         float aspect = (ext.height > 0)
             ? (static_cast<float>(ext.width) / static_cast<float>(ext.height))
             : 1.0f;
-        glm::mat4 proj = glm::perspective(glm::radians(55.0f), aspect, 0.5f, 500.0f);
+
+        if (state_.mode == Mode::Edit) {
+            // Free-fly camera for editor.
+            view = state_.viewport_camera.view_matrix();
+            proj = state_.viewport_camera.projection_matrix(aspect);
+        } else {
+            // Auto-orbit for Play/Simulate modes.
+            if (state_.mode == Mode::Play || state_.mode == Mode::Simulate) {
+                impl_->camera_orbit_time += delta_time;
+            }
+            const float r = 60.0f;
+            const float a = impl_->camera_orbit_time * 0.05f;
+            glm::vec3 eye(std::cos(a) * r, 25.0f, std::sin(a) * r);
+            glm::vec3 at(0.0f, 1.0f, 0.0f);
+            glm::vec3 up(0.0f, 1.0f, 0.0f);
+            view = glm::lookAt(eye, at, up);
+            proj = glm::perspective(glm::radians(55.0f), aspect, 0.5f, 500.0f);
+        }
+
         proj[1][1] *= -1.0f; // flip Y for Vulkan's clip space
         glm::mat4 vp = proj * view;
 

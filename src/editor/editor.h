@@ -20,6 +20,7 @@
 
 #include "core/result.h"
 #include "editor/mode_enum.h"
+#include "editor/scene_camera.h"
 #include "scene/entity_manager.h"
 
 #include <filesystem>
@@ -34,6 +35,21 @@ namespace odyssey::editor {
 
 class Panel;
 class SceneViewportRenderer;
+
+// Batch D: Gizmo operation modes (Q/W/E/R hotkeys).
+enum class GizmoMode {
+    Select,     // No gizmo displayed
+    Translate,  // Move entity (default)
+    Rotate,     // Rotate entity
+    Scale,      // Scale entity
+    Universal   // Combined transform
+};
+
+// Batch D: Gizmo coordinate space.
+enum class GizmoSpace {
+    Local,  // Entity-relative
+    World   // Global axes
+};
 
 // Editor state — the single pure-data struct passed to every Panel::draw.
 // Anything that's worth saving to an editor-layout file lives here.
@@ -105,6 +121,20 @@ struct EditorState {
     // into the matching `scene_data.entities[i].*` so the reconstruction
     // path sees the mutation.
     void* scene_data = nullptr;  // SceneData*, void* to avoid a header cycle
+
+    // --- Batch D: Free-fly camera (Edit mode) ---
+    SceneCamera viewport_camera;
+    GizmoMode gizmo_mode = GizmoMode::Translate;
+    GizmoSpace gizmo_space = GizmoSpace::World;
+
+    // Batch D: Snap settings (persist via editor_prefs.xml).
+    float snap_position = 0.25f;   // meters
+    float snap_rotation = 15.0f;   // degrees
+    float snap_scale = 0.1f;       // scale units
+    bool snap_enabled = false;
+
+    // Batch D: Grid overlay visibility toggle.
+    bool show_grid = true;
 };
 
 // Pure helper: given an entity pointer, produce a stable display label.

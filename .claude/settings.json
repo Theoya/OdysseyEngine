@@ -2,7 +2,36 @@
   "permissions": {
     "allow": [
       "Bash(cat /c/Users/THadfield/.claude/skills/*)",
-      "Bash(mkdir -p /c/Users/THadfield/.claude/skills/*)"
+      "Bash(mkdir -p /c/Users/THadfield/.claude/skills/*)",
+      "Bash(cmake --build *)",
+      "Bash(cmake -B *)",
+      "Bash(git push *)",
+      "Bash(git add *)",
+      "Bash(git commit *)",
+      "Bash(git checkout *)",
+      "Bash(git worktree *)",
+      "Bash(git reset *)",
+      "Bash(git rm *)",
+      "Bash(git remote *)",
+      "Bash(git merge *)",
+      "Bash(git pull *)",
+      "Bash(git fetch *)",
+      "Bash(./build/Release/odyssey_tests_unit*)",
+      "Bash(./build/Release/odyssey_tests_pipeline*)",
+      "Bash(./build/Release/odyssey_editor*)",
+      "Bash(./build/Release/odyssey_shooter*)",
+      "Bash(./build/Release/odyssey_fps*)",
+      "Bash(./build/Release/odyssey.exe *)",
+      "Bash(build/Release/odyssey_tests_unit*)",
+      "Bash(build/Release/odyssey_editor*)",
+      "Bash(build/Release/odyssey_shooter*)",
+      "Bash(mkdir -p *)",
+      "Bash(cp *)",
+      "Bash(mv *)",
+      "Bash(rm *)",
+      "Bash(rmdir *)",
+      "Bash(touch *)",
+      "Bash(pwd)"
     ]
   }
 }

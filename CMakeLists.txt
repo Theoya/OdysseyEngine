@@ -95,6 +95,22 @@ target_link_libraries(imgui_docking
     Vulkan::Vulkan
 )
 
+# ── ImGuizmo static library ─────────────────────────────────────────────────
+add_library(imguizmo STATIC
+    third_party/imguizmo/ImGuizmo.cpp
+    third_party/imguizmo/ImGuizmo.h
+)
+
+target_include_directories(imguizmo
+  PUBLIC
+    third_party/imguizmo
+)
+
+target_link_libraries(imguizmo
+  PUBLIC
+    imgui_docking
+)
+
 # ── Engine static library ───────────────────────────────────────────────────
 add_library(odyssey_engine STATIC ${ENGINE_SOURCES})
 
@@ -218,6 +234,7 @@ target_link_libraries(odyssey_editor
   PRIVATE
     odyssey_engine
     imgui_docking
+    imguizmo
 )
 
 add_dependencies(odyssey_editor copy_engine_assets copy_demo_assets)
